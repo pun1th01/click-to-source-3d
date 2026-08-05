@@ -1,0 +1,28 @@
+{
+  "name": "click-to-source-3d",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Source-level debugging for Three.js & React Three Fiber. Click any rendered object to trace it back to the source code that generated it.",
+  "keywords": [
+    "threejs",
+    "three.js",
+    "react-three-fiber",
+    "r3f",
+    "developer-tools",
+    "debugging",
+    "source-mapping",
+    "provenance"
+  ],
+  "license": "MIT",
+  "author": "",
+  "repository": {
+    "type": "git",
+    "url": ""
+  },
+  "workspaces": [
+    "packages/*"
+  ],
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
