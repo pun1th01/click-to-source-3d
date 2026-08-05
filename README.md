@@ -78,12 +78,6 @@ Detailed project documentation is available in the [`docs/`](docs/) directory:
 - **[Tech Stack](docs/tech-stack/)** — Technology choices and rationale.
 - **[Roadmap](docs/roadmap/)** — Detailed project roadmap and milestones.
 
-## Contributing
-
-Contributions will be welcomed once the MVP architecture stabilizes. In the meantime, feel free to open issues for discussion and feedback.
-
-For more details, see [CONTRIBUTING.md](CONTRIBUTING.md).
-
 ## License
 
 This project is licensed under the [MIT License](LICENSE).
