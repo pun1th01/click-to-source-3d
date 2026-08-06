@@ -24,9 +24,11 @@ Developers working on Three.js and React Three Fiber scenes often spend signific
 
 Current milestone:
 
-**Stage 1** — Manual provenance prototype.
+**Stage 2** — Source Mapping.
 
-The project is in its initial setup phase. Architecture documents, research, and technical approach documents are available in the `docs/` folder.
+**Stage 1 — Complete.** All 7 experiments were executed, validating provenance tracking across mount, re-render, recreation, HMR, and memoized generation scenarios. See the full report: [`Stage1_Experimental_Report.pdf`](docs/research/Stage1_Experimental_Report.pdf).
+
+Architecture documents, research, and technical approach documents are available in the `docs/` folder.
 
 ## Roadmap
 
@@ -74,7 +76,9 @@ Click-to-Source-3D/
 Detailed project documentation is available in the [`docs/`](docs/) directory:
 
 - **[Architecture](docs/architecture/)** — System design and architectural decisions.
-- **[Research](docs/research/)** — Technical approaches and competitor analysis.
+- **[Research](docs/research/)** — Technical approaches, competitor analysis, and experimental validation.
+  - [`Click-to-Source_Technical_Approaches.pdf`](docs/research/Click-to-Source_Technical_Approaches.pdf) — Technical approach analysis.
+  - [`Stage1_Experimental_Report.pdf`](docs/research/Stage1_Experimental_Report.pdf) — Stage 1 experimental validation report.
 - **[Tech Stack](docs/tech-stack/)** — Technology choices and rationale.
 - **[Roadmap](docs/roadmap/)** — Detailed project roadmap and milestones.
 
