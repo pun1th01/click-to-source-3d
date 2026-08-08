@@ -10,6 +10,8 @@ Developers working on Three.js and React Three Fiber scenes often spend signific
 
 **Click-to-Source 3D** aims to bridge runtime rendering and source code by allowing developers to interact directly with rendered objects and trace them back to the source responsible for generating them. Think of it as the 3D equivalent of browser DevTools' "Inspect Element" — but for Three.js scenes.
 
+Unlike DOM-focused click-to-source tools or general Three.js scene inspectors, this tool traces rendered objects back to the exact generator function and arguments that created them, not just their current runtime state.
+
 ## Goals
 
 - **Runtime Provenance** — Track which source code and parameters produced each rendered object.
@@ -24,7 +26,9 @@ Developers working on Three.js and React Three Fiber scenes often spend signific
 
 Current milestone:
 
-**Stage 2** — Source Mapping.
+**Stage 3** — Interactive Overlay.
+
+**Stage 2 — Complete.** Source Mapping architecture and metadata conventions finalized. See the full report: [`Stage2_Architectural_Validation_Report.pdf`](docs/architecture/Stage2_Architectural_Validation_Report.pdf).
 
 **Stage 1 — Complete.** All 7 experiments were executed, validating provenance tracking across mount, re-render, recreation, HMR, and memoized generation scenarios. See the full report: [`Stage1_Experimental_Report.pdf`](docs/research/Stage1_Experimental_Report.pdf).
 
@@ -34,19 +38,22 @@ Architecture documents, research, and technical approach documents are available
 
 | Stage | Milestone | Description |
 |-------|-----------|-------------|
-| 1 | Manual Metadata | Manually attach provenance metadata to Three.js objects |
-| 2 | Source Mapping | Map runtime objects back to source code locations |
-| 3 | Interactive Overlay | Visual overlay for clicking and inspecting objects in-scene |
-| 4 | Dogfooding | Internal testing with real-world Three.js projects |
-| 5 | Automatic Instrumentation | AST-based automatic provenance injection |
-| 6 | MCP Integration | Model Context Protocol integration for AI workflows |
+| 0 | Scope Freeze | Finalize core goals, non-goals, and project constraints |
+| 1 | Prove the Mechanism | Validate DOM-to-Source patterns and identify metadata injection techniques |
+| 2 | Provenance/Source Mapping Convention | Define canonical data structures and architectural boundaries |
+| 3 | Core Engine + Overlay MVP | Build the metadata pipeline and a basic UI for on-screen selection |
+| 4 | Dogfooding | Integrate into a complex test project to validate developer experience |
+| 5 | Package Polish | Finalize APIs, add tests, write docs, and prepare for external use |
+| 6 | MCP/AI Mode | Build standard MCP context interfaces for AI agents |
+| 6.5 | Optional Auto-Instrumentation | Research AST/Babel transformations to remove manual tagging |
+| 7 | Ship | Version 1.0 release |
 
 For the full roadmap, see [`docs/roadmap/`](docs/roadmap/).
 
 ## Repository Structure
 
 ```
-Click-to-Source-3D/
+click-to-source/
 │
 ├── docs/                        # Project documentation
 │   ├── architecture/            # Architecture decisions and design docs
@@ -84,6 +91,11 @@ Detailed project documentation is available in the [`docs/`](docs/) directory:
   - [`Stage1_Experimental_Report.pdf`](docs/research/Stage1_Experimental_Report.pdf) — Stage 1 experimental validation report.
 - **[Tech Stack](docs/tech-stack/)** — Technology choices and rationale.
 - **[Roadmap](docs/roadmap/)** — Detailed project roadmap and milestones.
+
+## Contributing
+
+Contributions are welcome! Please read our [Contributing Guidelines](CONTRIBUTING.md) and our [Code of Conduct](CODE_OF_CONDUCT.md).
+If you are opening an issue, please use the provided [Issue Templates](.github/ISSUE_TEMPLATE/).
 
 ## License
 
