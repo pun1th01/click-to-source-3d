@@ -6,5 +6,29 @@
   "license": "MIT",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
-  "scripts": {}
+  "scripts": {
+    "build": "tsc -b",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@click-to-source/core": "*",
+    "@click-to-source/shared": "*",
+    "zustand": "^5.0.14"
+  },
+  "peerDependencies": {
+    "@react-three/fiber": ">=8.0.0",
+    "react": ">=18.0.0",
+    "react-dom": ">=18.0.0",
+    "three": ">=0.170.0"
+  },
+  "devDependencies": {
+    "@react-three/fiber": "^9.7.0",
+    "@types/react": "^19.2.18",
+    "@types/react-dom": "^19.2.4",
+    "@types/three": "^0.170.0",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8",
+    "three": "^0.170.0",
+    "vitest": "^2.1.8"
+  }
 }

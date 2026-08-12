@@ -6,5 +6,18 @@
   "license": "MIT",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
-  "scripts": {}
+  "scripts": {
+    "build": "tsc -b",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@click-to-source/shared": "*",
+    "@babel/parser": "^7.29.8",
+    "magic-string": "^0.30.21",
+    "three": "^0.170.0"
+  },
+  "devDependencies": {
+    "@types/three": "^0.170.0",
+    "vitest": "^2.1.8"
+  }
 }

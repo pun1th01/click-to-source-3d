@@ -41,3 +41,12 @@ temp/
 # Package manager locks (keep only package-lock.json for npm)
 yarn.lock
 pnpm-lock.yaml
+
+# Compiled source output
+packages/*/src/**/*.js
+packages/*/src/**/*.d.ts
+packages/*/test/**/*.js
+packages/*/test/**/*.d.ts
+packages/examples/*.js
+packages/examples/*.d.ts
+
