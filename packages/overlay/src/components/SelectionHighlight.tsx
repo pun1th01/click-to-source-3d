@@ -4,6 +4,7 @@ import * as THREE from "three";
 import { EffectComposer } from "three/examples/jsm/postprocessing/EffectComposer.js";
 import { RenderPass } from "three/examples/jsm/postprocessing/RenderPass.js";
 import { OutlinePass } from "three/examples/jsm/postprocessing/OutlinePass.js";
+import { OutputPass } from "three/examples/jsm/postprocessing/OutputPass.js";
 import { useOverlayStore } from "../store/overlayStore";
 
 export function SelectionHighlight() {
@@ -29,6 +30,9 @@ export function SelectionHighlight() {
     outlinePass.hiddenEdgeColor.set("#00aa00");  // Darker green for hidden edges
     
     composer.addPass(outlinePass);
+
+    const outputPass = new OutputPass();
+    composer.addPass(outputPass);
 
     return { composer, outlinePass };
   }, [gl, scene, camera]); // Intentionally not including 'size' to avoid recreation on resize

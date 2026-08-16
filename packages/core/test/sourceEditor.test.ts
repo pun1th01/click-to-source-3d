@@ -203,4 +203,63 @@ const second = <mesh color="hotpink" />;`;
     );
     expect(source).toBe(`const mesh = <mesh scale={0.35} />;`);
   });
+
+  describe("VariableDeclarator support", () => {
+    it("replaces a literal inside a simple VariableDeclarator (including negative numbers)", () => {
+      const source = `const noiseFloor = -26;
+const lakeBedLevel = -20;`;
+
+      const result = editSource(source, {
+        file: "config.ts",
+        line: 1,
+        argName: "noiseFloor",
+        newValue: -30,
+      });
+
+      expect(result).toBe(`const noiseFloor = -30;
+const lakeBedLevel = -20;`);
+    });
+
+    it("resolves duplicate variable names using the supplied line number", () => {
+      const source = `function setup() {
+  const target = 1;
+}
+
+function process() {
+  const target = 2;
+}`;
+
+      const result = editSource(source, {
+        file: "script.ts",
+        line: 6,
+        argName: "target",
+        newValue: 5,
+      });
+
+      expect(result).toBe(`function setup() {
+  const target = 1;
+}
+
+function process() {
+  const target = 5;
+}`);
+    });
+
+    it("throws AMBIGUOUS_LOCATION if the same variable is defined twice on the exact same line (e.g. JSX and const)", () => {
+      const source = `const size = 10; <mesh size={10} />`;
+
+      expect(() =>
+        editSource(source, {
+          file: "mesh.tsx",
+          line: 1,
+          argName: "size",
+          newValue: 20,
+        })
+      ).toThrowError(
+        expect.objectContaining<Partial<SourceEditError>>({
+          code: "AMBIGUOUS_LOCATION",
+        })
+      );
+    });
+  });
 });

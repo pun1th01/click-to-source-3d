@@ -148,12 +148,21 @@ function addCandidate(
 }
 
 function isSupportedLiteral(node: BabelNode | undefined): node is BabelNode {
-  return (
-    node?.type === "StringLiteral" ||
-    node?.type === "NumericLiteral" ||
-    node?.type === "BooleanLiteral" ||
-    node?.type === "NullLiteral"
-  );
+  if (!node) return false;
+  if (
+    node.type === "StringLiteral" ||
+    node.type === "NumericLiteral" ||
+    node.type === "BooleanLiteral" ||
+    node.type === "NullLiteral"
+  ) {
+    return true;
+  }
+  
+  if (node.type === "UnaryExpression" && node.operator === "-" && (node.argument as BabelNode)?.type === "NumericLiteral") {
+    return true;
+  }
+  
+  return false;
 }
 
 function collectCandidates(sourceAst: BabelNode): EditCandidate[] {
@@ -214,6 +223,24 @@ function collectCandidates(sourceAst: BabelNode): EditCandidate[] {
           ancestors,
           "expression"
         );
+      }
+    }
+
+    if (value.type === "VariableDeclarator") {
+      const id = value.id as BabelNode | undefined;
+      const init = value.init as BabelNode | undefined;
+
+      if (id?.type === "Identifier" && typeof id.name === "string") {
+        if (isSupportedLiteral(init)) {
+          addCandidate(
+            candidates,
+            id.name,
+            init,
+            value,
+            ancestors,
+            "expression"
+          );
+        }
       }
     }
 
