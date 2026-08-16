@@ -46,6 +46,7 @@ function valueFromDraft(originalValue: unknown, draft: string): unknown {
 export function GenerationTrace() {
   const {
     sourceRef,
+    readonly,
     panelOpen,
     clearSelection,
     updateSourceRefArg,
@@ -181,37 +182,43 @@ export function GenerationTrace() {
                   style={{ display: "grid", gap: "4px" }}
                 >
                   <span>{argName}</span>
-                  <span style={{ display: "flex", gap: "6px" }}>
-                    <input
-                      aria-label={`Argument ${argName}`}
-                      data-testid={`source-arg-${argName}`}
-                      value={draftArgs[argName] ?? draftValue(originalValue)}
-                      onChange={(event) =>
-                        setDraftArgs((current) => ({
-                          ...current,
-                          [argName]: event.target.value,
-                        }))
-                      }
-                      style={{
-                        minWidth: 0,
-                        flex: 1,
-                        color: "#fff",
-                        backgroundColor: "rgba(0,0,0,0.5)",
-                        border: "1px solid #555",
-                        borderRadius: "4px",
-                        padding: "5px",
-                        fontFamily: "monospace",
-                      }}
-                    />
-                    <button
-                      type="button"
-                      onClick={() => void handleSave(argName)}
-                      disabled={savingArg !== null}
-                      style={{ cursor: "pointer" }}
-                    >
-                      {savingArg === argName ? "Saving…" : "Save"}
-                    </button>
-                  </span>
+                  {readonly ? (
+                    <div style={{ color: "#aaa", padding: "5px 0" }}>
+                      {draftValue(originalValue)}
+                    </div>
+                  ) : (
+                    <span style={{ display: "flex", gap: "6px" }}>
+                      <input
+                        aria-label={`Argument ${argName}`}
+                        data-testid={`source-arg-${argName}`}
+                        value={draftArgs[argName] ?? draftValue(originalValue)}
+                        onChange={(event) =>
+                          setDraftArgs((current) => ({
+                            ...current,
+                            [argName]: event.target.value,
+                          }))
+                        }
+                        style={{
+                          minWidth: 0,
+                          flex: 1,
+                          color: "#fff",
+                          backgroundColor: "rgba(0,0,0,0.5)",
+                          border: "1px solid #555",
+                          borderRadius: "4px",
+                          padding: "5px",
+                          fontFamily: "monospace",
+                        }}
+                      />
+                      <button
+                        type="button"
+                        onClick={() => void handleSave(argName)}
+                        disabled={savingArg !== null}
+                        style={{ cursor: "pointer" }}
+                      >
+                        {savingArg === argName ? "Saving…" : "Save"}
+                      </button>
+                    </span>
+                  )}
                 </label>
               ))}
             </div>

@@ -6,6 +6,8 @@ import type { SourceRef } from "@click-to-source/shared";
 export type OverlayState = {
   selectedObject: THREE.Object3D | null;
   sourceRef: SourceRef | null;
+  instanceId: number | null;
+  readonly: boolean;
   panelOpen: boolean;
 
   select: (result: ResolutionResult) => void;
@@ -17,12 +19,16 @@ export type OverlayState = {
 export const useOverlayStore = create<OverlayState>((set) => ({
   selectedObject: null,
   sourceRef: null,
+  instanceId: null,
+  readonly: false,
   panelOpen: false,
 
   select: (result) =>
     set({
       selectedObject: result.object,
       sourceRef: result.sourceRef,
+      instanceId: result.instanceId ?? null,
+      readonly: result.readonly ?? false,
       panelOpen: true,
     }),
 
@@ -30,6 +36,8 @@ export const useOverlayStore = create<OverlayState>((set) => ({
     set({
       selectedObject: null,
       sourceRef: null,
+      instanceId: null,
+      readonly: false,
       panelOpen: false,
     }),
 

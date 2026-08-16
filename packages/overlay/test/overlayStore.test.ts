@@ -11,6 +11,8 @@ describe("overlayStore", () => {
     const state = useOverlayStore.getState();
     expect(state.selectedObject).toBeNull();
     expect(state.sourceRef).toBeNull();
+    expect(state.instanceId).toBeNull();
+    expect(state.readonly).toBe(false);
     expect(state.panelOpen).toBe(false);
   });
 
@@ -23,6 +25,8 @@ describe("overlayStore", () => {
     const state = useOverlayStore.getState();
     expect(state.selectedObject).toBe(mesh);
     expect(state.sourceRef).toEqual(sourceRef);
+    expect(state.instanceId).toBeNull();
+    expect(state.readonly).toBe(false);
     expect(state.panelOpen).toBe(true);
   });
 
@@ -32,6 +36,8 @@ describe("overlayStore", () => {
     const state = useOverlayStore.getState();
     expect(state.selectedObject).toBeNull();
     expect(state.sourceRef).toBeNull();
+    expect(state.instanceId).toBeNull();
+    expect(state.readonly).toBe(false);
     expect(state.panelOpen).toBe(false);
   });
 
