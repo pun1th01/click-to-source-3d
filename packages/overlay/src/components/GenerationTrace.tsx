@@ -112,6 +112,12 @@ export function GenerationTrace() {
     }
   };
 
+  // TODO(follow-up): validate each arg against the source when the panel
+  // opens, and render args with no resolvable literal as read-only instead of
+  // as editable inputs. Today an unresolvable arg (a prop, a member
+  // expression, or a mismatched identifier) looks editable and only reports
+  // ARGUMENT_NOT_FOUND after Save is clicked. The `readonly` path below
+  // already renders exactly the needed state. See stage5 architecture notes.
   const args = Object.entries(sourceRef.args ?? {});
 
   return (
