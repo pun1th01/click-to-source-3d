@@ -10,6 +10,6 @@ export function useClickToSource() {
   ): ResolutionResult | null {
     // The R3F synthetic event already contains the intersected object.
     // We pass it directly to the core resolver, avoiding a redundant second raycast.
-    return resolveSourceRef(event.object);
+    return resolveSourceRef(event.object, event.instanceId);
   };
 }
