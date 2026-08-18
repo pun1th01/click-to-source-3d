@@ -4,6 +4,7 @@
   "private": true,
   "description": "Core provenance engine for Click-to-Source 3D",
   "license": "MIT",
+  "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "scripts": {
