@@ -7,6 +7,14 @@ export type SourceRef = {
   function: string;
   line: number;
   args: Record<string, unknown>;
+  /**
+   * Optional map from an `args` display key to the identifier as actually
+   * declared in source. Required only when the two differ — e.g. a display
+   * key of `waterLevel` for a constant declared `WATER_LEVEL`. Keys absent
+   * from this map resolve to themselves, so omitting the field entirely
+   * preserves the pre-existing behaviour.
+   */
+  argSources?: Record<string, string>;
   schemaVersion?: number;
 };
 

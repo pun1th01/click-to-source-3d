@@ -54,6 +54,67 @@ describe("source edit client", () => {
     ]);
   });
 
+  it("resolves a display key through argSources to its declared identifier", async () => {
+    const calls: Array<{ input: string; body: Record<string, unknown> }> = [];
+    const fetchImpl: SourceEditFetch = async (input, init) => {
+      const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+      calls.push({ input, body });
+
+      if (input === "/__cts/read-file") {
+        return jsonResponse({ content: "const WATER_LEVEL = -13" });
+      }
+
+      return jsonResponse({ success: true });
+    };
+
+    await editSourceFile(
+      {
+        file: "src/components/Water.jsx",
+        function: "Water",
+        line: 6,
+        args: { waterLevel: -13 },
+        argSources: { waterLevel: "WATER_LEVEL" },
+      },
+      "waterLevel",
+      -20,
+      fetchImpl
+    );
+
+    const write = calls.find((call) => call.input === "/__cts/write-file");
+    expect(write?.body.argName).toBe("WATER_LEVEL");
+    expect(write?.body.newValue).toBe(-20);
+  });
+
+  it("passes an unmapped key through unchanged when argSources is absent", async () => {
+    const calls: Array<{ input: string; body: Record<string, unknown> }> = [];
+    const fetchImpl: SourceEditFetch = async (input, init) => {
+      const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+      calls.push({ input, body });
+
+      if (input === "/__cts/read-file") {
+        return jsonResponse({ content: "const noiseFloor = -30" });
+      }
+
+      return jsonResponse({ success: true });
+    };
+
+    await editSourceFile(
+      {
+        file: "src/components/Terrain.jsx",
+        function: "Terrain",
+        line: 20,
+        args: { noiseFloor: -30 },
+      },
+      "noiseFloor",
+      -40,
+      fetchImpl
+    );
+
+    const write = calls.find((call) => call.input === "/__cts/write-file");
+    expect(write?.body.argName).toBe("noiseFloor");
+    expect(write?.body.newValue).toBe(-40);
+  });
+
   it("surfaces a failed file transport response", async () => {
     const fetchImpl: SourceEditFetch = async () =>
       jsonResponse({ error: "Source edit failed" }, 400);

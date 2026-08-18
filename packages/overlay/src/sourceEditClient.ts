@@ -75,7 +75,10 @@ export async function editSourceFile(
   const request: EditRequest = {
     file: sourceRef.file,
     line: sourceRef.line,
-    argName,
+    // `argName` is the panel's display key; editSource matches against the
+    // identifier as declared in source. Resolve through argSources when the
+    // generator declares a mapping, otherwise pass the key through unchanged.
+    argName: sourceRef.argSources?.[argName] ?? argName,
     newValue,
   };
 
