@@ -28,11 +28,14 @@
   "dependencies": {
     "@click-to-source/shared": "0.1.0",
     "@babel/parser": "^7.29.8",
-    "magic-string": "^0.30.21",
-    "three": "^0.170.0"
+    "magic-string": "^0.30.21"
+  },
+  "peerDependencies": {
+    "three": ">=0.170.0 <0.180.0"
   },
   "devDependencies": {
     "@types/three": "^0.170.0",
+    "three": "^0.170.0",
     "vitest": "^2.1.8"
   }
 }
