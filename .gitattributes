@@ -1,0 +1,67 @@
+# Mark binary formats explicitly so git never applies end-of-line
+# conversion to them.
+#
+# Git guesses text vs binary by looking for a NUL byte in the first 8000
+# bytes. Formats that happen not to contain one in their header — PDFs
+# produced by several common generators, for instance — are misclassified
+# as text. With core.autocrlf enabled, checkout then rewrites every LF to
+# CRLF, inflating the file by one byte per line and invalidating any
+# format that stores absolute byte offsets. PDF cross-reference tables are
+# the case this repository actually hit.
+#
+# "binary" is shorthand for "-text -diff": no EOL conversion, and no
+# attempt to render a textual diff.
+
+# Documents
+*.pdf   binary
+
+# Images — note that .svg is XML and is deliberately left as text
+*.png   binary
+*.jpg   binary
+*.jpeg  binary
+*.gif   binary
+*.webp  binary
+*.avif  binary
+*.bmp   binary
+*.ico   binary
+
+# Fonts
+*.woff  binary
+*.woff2 binary
+*.ttf   binary
+*.otf   binary
+*.eot   binary
+
+# 3D assets — .gltf, .obj, and .mtl are text formats and are excluded
+*.glb   binary
+*.fbx   binary
+*.ktx2  binary
+*.basis binary
+*.hdr   binary
+*.exr   binary
+*.bin   binary
+*.drc   binary
+
+# Audio and video
+*.mp3   binary
+*.wav   binary
+*.ogg   binary
+*.mp4   binary
+*.webm  binary
+*.mov   binary
+
+# Archives
+*.zip   binary
+*.gz    binary
+*.tgz   binary
+*.bz2   binary
+*.7z    binary
+*.rar   binary
+
+# Compiled and native artefacts
+*.wasm  binary
+*.node  binary
+*.dll   binary
+*.exe   binary
+*.so    binary
+*.dylib binary
