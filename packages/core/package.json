@@ -26,9 +26,7 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@click-to-source/shared": "0.1.0",
-    "@babel/parser": "^7.29.8",
-    "magic-string": "^0.30.21"
+    "@click-to-source/shared": "0.1.0"
   },
   "peerDependencies": {
     "three": ">=0.170.0 <0.180.0"

@@ -1,5 +1,4 @@
-import type { EditRequest } from "@click-to-source/core";
-import type { SourceRef } from "@click-to-source/shared";
+import type { EditRequest, SourceRef } from "@click-to-source/shared";
 
 const READ_FILE_PATH = "/__cts/read-file";
 const WRITE_FILE_PATH = "/__cts/write-file";
