@@ -1,7 +1,7 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
-import { fileIoPlugin } from "./vite-file-io";
+import { clickToSource } from "@click-to-source/vite-plugin";
 
 export default defineConfig({
-  plugins: [react(), fileIoPlugin()],
+  plugins: [react(), clickToSource()],
 });

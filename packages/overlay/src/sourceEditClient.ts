@@ -1,7 +1,9 @@
-import type { EditRequest, SourceRef } from "@click-to-source/shared";
-
-const READ_FILE_PATH = "/__cts/read-file";
-const WRITE_FILE_PATH = "/__cts/write-file";
+import {
+  READ_FILE_PATH,
+  WRITE_FILE_PATH,
+  type EditRequest,
+  type SourceRef,
+} from "@click-to-source/shared";
 
 type JsonResponse = {
   ok: boolean;

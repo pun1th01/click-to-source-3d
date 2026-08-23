@@ -12,6 +12,7 @@
     "@click-to-source/core": "*",
     "@click-to-source/overlay": "*",
     "@click-to-source/shared": "*",
+    "@click-to-source/vite-plugin": "0.1.0",
     "@react-three/fiber": "^9.7.0",
     "@vitejs/plugin-react": "^6.0.5",
     "react": "^19.2.8",
