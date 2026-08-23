@@ -30,3 +30,46 @@ export type InstanceSourceRef = {
   /** The provenance metadata for this specific instance. */
   sourceRef: SourceRef;
 };
+
+/**
+ * The dev-server endpoints backing the source-edit round trip.
+ *
+ * Both halves of the contract import these: the browser client in
+ * `@click-to-source/overlay` and the dev-server plugin in
+ * `@click-to-source/vite-plugin`. A single definition is what keeps the two
+ * sides from drifting apart silently — a mismatch leaves the panel able to
+ * resolve provenance but unable to write anything back, with no error to
+ * point at.
+ *
+ * These are the first runtime values in this package. Consumers that
+ * previously erased their import of it entirely will now carry a real one.
+ */
+export const READ_FILE_PATH = "/__cts/read-file";
+export const WRITE_FILE_PATH = "/__cts/write-file";
+
+/**
+ * A request to rewrite a single argument at a known source location.
+ *
+ * Produced by the overlay client from a {@link SourceRef}, consumed by the
+ * editor in the dev-server plugin. `argName` is the identifier as declared
+ * in source, which is not always the panel's display key — see
+ * `SourceRef.argSources`.
+ */
+export type EditRequest = {
+  file: string;
+  line: number;
+  argName: string;
+  newValue: unknown;
+};
+
+/**
+ * Why a source edit failed. Returned to the client as the `code` field
+ * alongside the human-readable `error` message.
+ */
+export type SourceEditErrorCode =
+  | "INVALID_REQUEST"
+  | "PARSE_ERROR"
+  | "ARGUMENT_NOT_FOUND"
+  | "LOCATION_NOT_FOUND"
+  | "AMBIGUOUS_LOCATION"
+  | "UNSUPPORTED_VALUE";
