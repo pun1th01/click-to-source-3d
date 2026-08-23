@@ -1,13 +1,26 @@
 {
   "name": "@click-to-source/shared",
-  "version": "0.0.0",
-  "private": true,
+  "version": "0.1.0",
   "description": "Shared utilities and types for Click-to-Source 3D",
   "license": "MIT",
   "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./package.json": "./package.json"
+  },
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
+  "files": [
+    "dist"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
-    "build": "tsc -b"
+    "build": "tsc -b",
+    "prepack": "tsc -b --force"
   }
 }

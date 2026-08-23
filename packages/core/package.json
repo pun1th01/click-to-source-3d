@@ -1,18 +1,32 @@
 {
   "name": "@click-to-source/core",
-  "version": "0.0.0",
-  "private": true,
+  "version": "0.1.0",
   "description": "Core provenance engine for Click-to-Source 3D",
   "license": "MIT",
   "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./package.json": "./package.json"
+  },
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
+  "files": [
+    "dist"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
     "build": "tsc -b",
+    "prepack": "tsc -b --force",
+    "prepublishOnly": "npm run test",
     "test": "vitest run"
   },
   "dependencies": {
-    "@click-to-source/shared": "*",
+    "@click-to-source/shared": "0.1.0",
     "@babel/parser": "^7.29.8",
     "magic-string": "^0.30.21",
     "three": "^0.170.0"
