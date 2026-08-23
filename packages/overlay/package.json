@@ -24,6 +24,7 @@
     "build": "tsc -b",
     "prepack": "npm run clean && tsc -b",
     "prepublishOnly": "npm run test",
+    "pretest": "tsc -b",
     "test": "vitest run"
   },
   "dependencies": {
