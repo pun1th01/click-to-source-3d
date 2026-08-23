@@ -23,8 +23,9 @@
     "node": ">=18.0.0"
   },
   "scripts": {
+    "clean": "node -e \"const f=require('fs');f.rmSync('dist',{recursive:true,force:true});f.rmSync('tsconfig.tsbuildinfo',{force:true})\"",
     "build": "tsc -b",
-    "prepack": "tsc -b --force",
+    "prepack": "npm run clean && tsc -b",
     "prepublishOnly": "npm run test",
     "test": "vitest run"
   },
