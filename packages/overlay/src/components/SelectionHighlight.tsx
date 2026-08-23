@@ -5,7 +5,7 @@ import { EffectComposer } from "three/examples/jsm/postprocessing/EffectComposer
 import { RenderPass } from "three/examples/jsm/postprocessing/RenderPass.js";
 import { OutlinePass } from "three/examples/jsm/postprocessing/OutlinePass.js";
 import { OutputPass } from "three/examples/jsm/postprocessing/OutputPass.js";
-import { useOverlayStore } from "../store/overlayStore";
+import { useOverlayStore } from "../store/overlayStore.js";
 
 export function SelectionHighlight() {
   const { gl, scene, camera, size } = useThree();

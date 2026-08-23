@@ -1,2 +1,2 @@
-export * from "./resolver";
-export * from "./sourceEditor";
+export * from "./resolver.js";
+export * from "./sourceEditor.js";

@@ -1,9 +1,9 @@
 import React, { useEffect, useState } from "react";
-import { useOverlayStore } from "../store/overlayStore";
+import { useOverlayStore } from "../store/overlayStore.js";
 import {
   editSourceFile,
   SourceEditTransportError,
-} from "../sourceEditClient";
+} from "../sourceEditClient.js";
 
 function draftValue(value: unknown): string {
   if (typeof value === "string") {
