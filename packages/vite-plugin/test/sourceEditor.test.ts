@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { editSource, SourceEditError } from "../src/sourceEditor";
+import { editSource, SourceEditError } from "../src/sourceEditor.js";
 
 function lineContaining(source: string, text: string, occurrence = 1): number {
   let seen = 0;

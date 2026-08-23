@@ -3,9 +3,10 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { createServer, type ViteDevServer } from "vite";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { fileIoPlugin } from "../vite-file-io";
+import { READ_FILE_PATH, WRITE_FILE_PATH } from "@click-to-source/shared";
+import { clickToSource } from "../src/plugin.js";
 
-const examplesRoot = path.resolve(
+const pluginRoot = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
   ".."
 );
@@ -30,15 +31,15 @@ async function postJson(endpoint: string, body: unknown) {
 describe("Step 6 Vite file I/O plugin", () => {
   beforeAll(async () => {
     fixtureDirectory = await fs.mkdtemp(
-      path.join(examplesRoot, ".cts-step6-fixture-")
+      path.join(pluginRoot, ".cts-plugin-fixture-")
     );
 
     server = await createServer({
       appType: "custom",
       configFile: false,
       logLevel: "silent",
-      root: examplesRoot,
-      plugins: [fileIoPlugin()],
+      root: pluginRoot,
+      plugins: [clickToSource()],
       server: {
         host: "127.0.0.1",
         port: 0,
@@ -64,11 +65,11 @@ describe("Step 6 Vite file I/O plugin", () => {
 
   it("reads an existing project file", async () => {
     const expectedContent = await fs.readFile(
-      path.join(examplesRoot, "src", "main.tsx"),
+      path.join(pluginRoot, "src", "index.ts"),
       "utf8"
     );
-    const result = await postJson("/__cts/read-file", {
-      file: "src/main.tsx",
+    const result = await postJson(READ_FILE_PATH, {
+      file: "src/index.ts",
     });
 
     expect(result.status).toBe(200);
@@ -78,15 +79,15 @@ describe("Step 6 Vite file I/O plugin", () => {
   it("writes and reads back a fixture without changing its content", async () => {
     const content = "const value = 1;\r\n// preserve this line exactly\n✓\n";
     const fixtureFile = path.relative(
-      examplesRoot,
+      pluginRoot,
       path.join(fixtureDirectory, "fixture.tsx")
     );
 
-    const writeResult = await postJson("/__cts/write-file", {
+    const writeResult = await postJson(WRITE_FILE_PATH, {
       file: fixtureFile,
       content,
     });
-    const readResult = await postJson("/__cts/read-file", {
+    const readResult = await postJson(READ_FILE_PATH, {
       file: fixtureFile,
     });
 
@@ -94,7 +95,7 @@ describe("Step 6 Vite file I/O plugin", () => {
     expect(writeResult.body).toEqual({ success: true });
     expect(readResult.status).toBe(200);
     expect(readResult.body).toEqual({ content });
-    expect(await fs.readFile(path.join(examplesRoot, fixtureFile), "utf8")).toBe(
+    expect(await fs.readFile(path.join(pluginRoot, fixtureFile), "utf8")).toBe(
       content
     );
   });
@@ -104,16 +105,16 @@ describe("Step 6 Vite file I/O plugin", () => {
 const cyan = <mesh color="cyan" />;
 `;
     const fixtureFile = path.relative(
-      examplesRoot,
+      pluginRoot,
       path.join(fixtureDirectory, "step8-fixture.tsx")
     );
 
-    await fs.writeFile(path.join(examplesRoot, fixtureFile), content, "utf8");
+    await fs.writeFile(path.join(pluginRoot, fixtureFile), content, "utf8");
 
-    const readResult = await postJson("/__cts/read-file", {
+    const readResult = await postJson(READ_FILE_PATH, {
       file: fixtureFile,
     });
-    const writeResult = await postJson("/__cts/write-file", {
+    const writeResult = await postJson(WRITE_FILE_PATH, {
       file: fixtureFile,
       content: readResult.body.content,
       line: 1,
@@ -124,7 +125,7 @@ const cyan = <mesh color="cyan" />;
     expect(readResult.status).toBe(200);
     expect(writeResult.status).toBe(200);
     expect(writeResult.body).toEqual({ success: true });
-    expect(await fs.readFile(path.join(examplesRoot, fixtureFile), "utf8")).toBe(
+    expect(await fs.readFile(path.join(pluginRoot, fixtureFile), "utf8")).toBe(
       `const pink = <mesh color="rebeccapurple" />;
 const cyan = <mesh color="cyan" />;
 `
@@ -132,15 +133,15 @@ const cyan = <mesh color="cyan" />;
   });
 
   it("rejects invalid bodies, missing files, and paths outside the Vite root", async () => {
-    const invalidBody = await postJson("/__cts/read-file", {});
-    const missingFile = await postJson("/__cts/read-file", {
-      file: "src/does-not-exist.tsx",
+    const invalidBody = await postJson(READ_FILE_PATH, {});
+    const missingFile = await postJson(READ_FILE_PATH, {
+      file: "src/does-not-exist.ts",
     });
-    const traversal = await postJson("/__cts/read-file", {
+    const traversal = await postJson(READ_FILE_PATH, {
       file: "..\\..\\package.json",
     });
-    const absolutePath = await postJson("/__cts/read-file", {
-      file: path.join(examplesRoot, "src", "main.tsx"),
+    const absolutePath = await postJson(READ_FILE_PATH, {
+      file: path.join(pluginRoot, "src", "index.ts"),
     });
 
     expect(invalidBody.status).toBe(400);

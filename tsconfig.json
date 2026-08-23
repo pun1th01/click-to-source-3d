@@ -17,7 +17,8 @@
   "references": [
     { "path": "packages/shared" },
     { "path": "packages/core" },
-    { "path": "packages/overlay" }
+    { "path": "packages/overlay" },
+    { "path": "packages/vite-plugin" }
   ],
   "exclude": ["node_modules", "dist"]
 }
