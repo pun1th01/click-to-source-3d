@@ -23,6 +23,96 @@ type FileRequest = ReadFileRequest | WriteFileRequest | EditWriteFileRequest;
 
 type FileSystemError = NodeJS.ErrnoException;
 
+/**
+ * Extensions the editor can actually operate on.
+ *
+ * editSource parses with @babel/parser, so this list tracks what the parser
+ * handles rather than being an arbitrary policy. Anything outside it could
+ * only ever be read or clobbered wholesale, never meaningfully edited.
+ */
+export const DEFAULT_ALLOWED_EXTENSIONS = [
+  ".js",
+  ".jsx",
+  ".ts",
+  ".tsx",
+  ".mjs",
+  ".cjs",
+  ".mts",
+  ".cts",
+] as const;
+
+export type FileRequestOptions = {
+  allowedExtensions: readonly string[];
+  allowedOrigins: readonly string[];
+};
+
+/**
+ * Whether a requested path is one the editor is permitted to touch.
+ *
+ * Two rules, and the second is not redundant. path.extname(".env") returns
+ * "" rather than ".env", because Node treats a leading dot as the start of a
+ * basename — so dotfiles fail the extension test by accident of that return
+ * value, not by intent. The accident does not cover dotfiles that do carry a
+ * recognised extension: ".babelrc.js" yields ".js" and ".hidden.ts" yields
+ * ".ts", both of which would otherwise pass. Rejecting dot-prefixed
+ * basenames outright closes that gap and makes the dotfile rule explicit
+ * rather than incidental.
+ */
+function isEditableFile(
+  requestedFile: string,
+  allowedExtensions: readonly string[]
+): boolean {
+  const basename = path.basename(requestedFile.replace(/[\\/]+/g, path.sep));
+
+  if (basename.startsWith(".")) {
+    return false;
+  }
+
+  return allowedExtensions.includes(path.extname(basename));
+}
+
+/**
+ * Rejects cross-origin browser requests.
+ *
+ * Without this, any page open in the developer's browser can POST to the dev
+ * server and read or rewrite files in their project. A request with no Origin
+ * header is allowed: that is a non-browser client such as curl or the test
+ * suite, and anything with local shell access can edit the files directly
+ * anyway, so refusing it buys nothing.
+ */
+function isAllowedOrigin(
+  request: IncomingMessage,
+  allowedOrigins: readonly string[]
+): boolean {
+  // Browsers set Sec-Fetch-Site on every request, so a cross-site value is a
+  // rejection signal that does not depend on parsing Origin at all.
+  if (request.headers["sec-fetch-site"] === "cross-site") {
+    return false;
+  }
+
+  const origin = request.headers.origin;
+
+  if (typeof origin !== "string" || origin.length === 0) {
+    return true;
+  }
+
+  if (allowedOrigins.includes(origin)) {
+    return true;
+  }
+
+  const host = request.headers.host;
+
+  if (typeof host !== "string" || host.length === 0) {
+    return false;
+  }
+
+  try {
+    return new URL(origin).host === host;
+  } catch {
+    return false;
+  }
+}
+
 function sendJson(
   response: ServerResponse,
   statusCode: number,
@@ -195,8 +285,14 @@ export async function handleFileRequest(
   request: IncomingMessage,
   response: ServerResponse,
   root: string,
-  operation: "read" | "write"
+  operation: "read" | "write",
+  options: FileRequestOptions
 ) {
+  if (!isAllowedOrigin(request, options.allowedOrigins)) {
+    sendJson(response, 403, { error: "Cross-origin request rejected" });
+    return;
+  }
+
   if (request.method !== "POST") {
     response.setHeader("Allow", "POST");
     sendJson(response, 405, { error: "Method not allowed" });
@@ -223,6 +319,13 @@ export async function handleFileRequest(
 
   if (!filePath) {
     sendJson(response, 400, { error: "Invalid file path" });
+    return;
+  }
+
+  // Deliberately after the traversal check: an escape attempt is the more
+  // specific finding and should be what the caller is told about.
+  if (!isEditableFile(parsedRequest.file, options.allowedExtensions)) {
+    sendJson(response, 400, { error: "File type not editable" });
     return;
   }
 
