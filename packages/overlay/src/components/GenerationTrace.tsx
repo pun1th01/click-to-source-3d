@@ -1,5 +1,7 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { useOverlayStore } from "../store/overlayStore.js";
+import { describeMesh } from "../meshDetails.js";
+import { MeshDetails } from "./MeshDetails.js";
 import {
   editSourceFile,
   SourceEditTransportError,
@@ -45,16 +47,25 @@ function valueFromDraft(originalValue: unknown, draft: string): unknown {
 
 export function GenerationTrace() {
   const {
+    selectedObject,
+    instanceId,
     sourceRef,
     readonly,
     panelOpen,
+    meshDetailsOpen,
     clearSelection,
+    setMeshDetailsOpen,
     updateSourceRefArg,
   } = useOverlayStore();
   const [draftArgs, setDraftArgs] = useState<Record<string, string>>({});
   const [savingArg, setSavingArg] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  const meshDetails = useMemo(
+    () => describeMesh(selectedObject, instanceId),
+    [selectedObject, instanceId]
+  );
 
   useEffect(() => {
     if (!sourceRef) {
@@ -230,6 +241,12 @@ export function GenerationTrace() {
             </div>
           )}
         </div>
+
+        <MeshDetails
+          details={meshDetails}
+          open={meshDetailsOpen}
+          onToggle={setMeshDetailsOpen}
+        />
 
         {status && (
           <div role="status" style={{ color: "#9fe6a0", marginTop: "10px" }}>

@@ -9,10 +9,17 @@ export type OverlayState = {
   instanceId: number | null;
   readonly: boolean;
   panelOpen: boolean;
+  /**
+   * Whether the mesh attributes disclosure is expanded. A preference rather
+   * than selection state: deliberately untouched by select and
+   * clearSelection, so it survives from one click to the next.
+   */
+  meshDetailsOpen: boolean;
 
   select: (result: ResolutionResult) => void;
   clearSelection: () => void;
   setPanelOpen: (open: boolean) => void;
+  setMeshDetailsOpen: (open: boolean) => void;
   updateSourceRefArg: (argName: string, value: unknown) => void;
 };
 
@@ -22,6 +29,7 @@ export const useOverlayStore = create<OverlayState>((set) => ({
   instanceId: null,
   readonly: false,
   panelOpen: false,
+  meshDetailsOpen: false,
 
   select: (result) =>
     set({
@@ -42,6 +50,10 @@ export const useOverlayStore = create<OverlayState>((set) => ({
     }),
 
   setPanelOpen: (open) => set({ panelOpen: open }),
+
+  // Intentionally omitted from select and clearSelection above: resetting it
+  // per selection would defeat the point of persisting it.
+  setMeshDetailsOpen: (open) => set({ meshDetailsOpen: open }),
 
   updateSourceRefArg: (argName, value) =>
     set((state) => {

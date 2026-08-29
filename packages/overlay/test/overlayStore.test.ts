@@ -82,4 +82,42 @@ describe("overlayStore", () => {
     });
   });
 
+  describe("meshDetailsOpen", () => {
+    it("is closed by default", () => {
+      useOverlayStore.setState({ meshDetailsOpen: false });
+
+      expect(useOverlayStore.getState().meshDetailsOpen).toBe(false);
+    });
+
+    it("toggles through setMeshDetailsOpen", () => {
+      useOverlayStore.getState().setMeshDetailsOpen(true);
+      expect(useOverlayStore.getState().meshDetailsOpen).toBe(true);
+
+      useOverlayStore.getState().setMeshDetailsOpen(false);
+      expect(useOverlayStore.getState().meshDetailsOpen).toBe(false);
+    });
+
+    // It is a preference, not selection state. Resetting it on either
+    // transition would mean re-opening the disclosure on every click.
+    it("survives select", () => {
+      useOverlayStore.getState().setMeshDetailsOpen(true);
+
+      useOverlayStore.getState().select({
+        object: new THREE.Mesh(),
+        sourceRef: { file: "a.tsx", function: "A", line: 1, args: {} },
+      });
+
+      expect(useOverlayStore.getState().meshDetailsOpen).toBe(true);
+    });
+
+    it("survives clearSelection", () => {
+      useOverlayStore.getState().setMeshDetailsOpen(true);
+
+      useOverlayStore.getState().clearSelection();
+
+      expect(useOverlayStore.getState().meshDetailsOpen).toBe(true);
+      expect(useOverlayStore.getState().selectedObject).toBeNull();
+    });
+  });
+
 });
