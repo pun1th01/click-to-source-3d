@@ -238,3 +238,107 @@ describe("resolveObjectAtPoint", () => {
     expect(result).toBeNull();
   });
 });
+
+describe("resolveSourceRef — manual vs stamped provenance", () => {
+  const stamp = (file: string, fn: string, line: number) => ({
+    file,
+    function: fn,
+    line,
+  });
+
+  it("resolves a stamp when no manual ref exists anywhere", () => {
+    const mesh = new THREE.Mesh();
+    mesh.userData.__ctsSource = stamp("src/Scene.jsx", "Scene", 12);
+
+    const result = resolveSourceRef(mesh);
+
+    expect(result?.sourceRef).toEqual({
+      file: "src/Scene.jsx",
+      function: "Scene",
+      line: 12,
+      args: {},
+    });
+    expect(result?.object).toBe(mesh);
+  });
+
+  it("merges field by field when both sit on the same object, manual winning", () => {
+    const mesh = new THREE.Mesh();
+    mesh.userData.__ctsSource = stamp("src/Terrain.jsx", "Terrain", 255);
+    mesh.userData.sourceRef = {
+      line: 20,
+      args: { noiseFloor: -26, lakeBedLevel: -20 },
+    };
+
+    const result = resolveSourceRef(mesh);
+
+    // file and function come from the stamp; the author overrode only line
+    expect(result?.sourceRef).toEqual({
+      file: "src/Terrain.jsx",
+      function: "Terrain",
+      line: 20,
+      args: { noiseFloor: -26, lakeBedLevel: -20 },
+    });
+  });
+
+  // The rule that reads as wrong until you know why: a stamp is applied to
+  // every host element indiscriminately, a manual ref is a deliberate choice.
+  it("prefers a manual ref on an ancestor over a stamp on the clicked object", () => {
+    const group = new THREE.Group();
+    const mesh = new THREE.Mesh();
+    group.add(mesh);
+
+    group.userData.sourceRef = {
+      file: "src/Scene.jsx",
+      function: "Scene",
+      line: 74,
+      args: { seed: 1 },
+    };
+    mesh.userData.__ctsSource = stamp("src/Terrain.jsx", "Terrain", 255);
+
+    const result = resolveSourceRef(mesh);
+
+    expect(result?.sourceRef.file).toBe("src/Scene.jsx");
+    expect(result?.object).toBe(group);
+  });
+
+  it("still prefers the innermost manual ref when several ancestors carry one", () => {
+    const root = new THREE.Group();
+    const mid = new THREE.Group();
+    const leaf = new THREE.Mesh();
+    root.add(mid);
+    mid.add(leaf);
+
+    root.userData.sourceRef = { file: "root.jsx", function: "Root", line: 1, args: {} };
+    mid.userData.sourceRef = { file: "mid.jsx", function: "Mid", line: 2, args: {} };
+
+    expect(resolveSourceRef(leaf)?.object).toBe(mid);
+  });
+
+  it("prefers the nearest stamp when only stamps exist", () => {
+    const group = new THREE.Group();
+    const mesh = new THREE.Mesh();
+    group.add(mesh);
+
+    group.userData.__ctsSource = stamp("src/Scene.jsx", "Scene", 74);
+    mesh.userData.__ctsSource = stamp("src/Terrain.jsx", "Terrain", 255);
+
+    expect(resolveSourceRef(mesh)?.object).toBe(mesh);
+    expect(resolveSourceRef(mesh)?.sourceRef.line).toBe(255);
+  });
+
+  it("defaults args to an empty object when the author omitted it", () => {
+    const mesh = new THREE.Mesh();
+    mesh.userData.__ctsSource = stamp("src/Scene.jsx", "Scene", 12);
+    mesh.userData.sourceRef = { line: 5 };
+
+    expect(resolveSourceRef(mesh)?.sourceRef.args).toEqual({});
+  });
+
+  it("returns null when neither is present anywhere in the chain", () => {
+    const group = new THREE.Group();
+    const mesh = new THREE.Mesh();
+    group.add(mesh);
+
+    expect(resolveSourceRef(mesh)).toBeNull();
+  });
+});

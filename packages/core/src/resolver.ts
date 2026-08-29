@@ -1,5 +1,9 @@
 import * as THREE from "three";
-import { SourceRef, InstanceSourceRef } from "@click-to-source/shared";
+import {
+  SourceRef,
+  InstanceSourceRef,
+  SourceStamp,
+} from "@click-to-source/shared";
 
 /**
  * The core resolution result providing both the intersected object
@@ -73,16 +77,56 @@ export function resolveSourceRef(
     return instanceResult;
   }
 
-  // Standard path: walk up the parent chain looking for userData.sourceRef.
+  // Standard path: two passes up the parent chain. Manual provenance anywhere
+  // in the chain outranks an automatic stamp anywhere in the chain, even when
+  // the stamp sits on a nearer object.
+  //
+  // That ordering looks wrong at first glance, because everywhere else here
+  // the innermost match wins. The reason it inverts: stamps are applied by the
+  // build transform to every host element indiscriminately, while a
+  // hand-written sourceRef is a deliberate statement that this call site is
+  // the one worth showing. If the nearest stamp won, switching the transform
+  // on would silently shadow every existing hand-written ref that happens to
+  // have stamped descendants — the feature would break the escape hatch it is
+  // meant to complement. Manual is the override path, so it wins outright.
+  //
+  // Within a single object the two merge field by field, manual winning per
+  // field. That is what lets an author write only `args` and inherit file,
+  // function and line from the stamp.
   let current: THREE.Object3D | null = object;
 
   while (current) {
-    if (current.userData && current.userData.sourceRef) {
+    const manual = current.userData?.sourceRef as
+      | Partial<SourceRef>
+      | undefined;
+
+    if (manual) {
+      const stamp = current.userData?.__ctsSource as SourceStamp | undefined;
+
       return {
         object: current,
-        sourceRef: current.userData.sourceRef as SourceRef,
+        sourceRef: { ...(stamp ?? {}), ...manual, args: manual.args ?? {} } as SourceRef,
       };
     }
+
+    current = current.parent;
+  }
+
+  // Second pass: no manual ref anywhere, so the nearest stamp wins.
+  current = object;
+
+  while (current) {
+    const stamp = current.userData?.__ctsSource as SourceStamp | undefined;
+
+    if (stamp) {
+      return {
+        object: current,
+        // A stamp names a call site but knows nothing about which values are
+        // editable, so args is empty and the panel renders no argument rows.
+        sourceRef: { ...stamp, args: {} },
+      };
+    }
+
     current = current.parent;
   }
 

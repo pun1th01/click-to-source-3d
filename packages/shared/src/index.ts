@@ -73,3 +73,26 @@ export type SourceEditErrorCode =
   | "LOCATION_NOT_FOUND"
   | "AMBIGUOUS_LOCATION"
   | "UNSUPPORTED_VALUE";
+
+/**
+ * Location stamped onto `userData.__ctsSource` by the build-time transform in
+ * `@click-to-source/vite-plugin`.
+ *
+ * Carries only what a JSX element's own position can tell you. `args` is
+ * absent by design: the transform knows where a call site is, not which of
+ * its values are worth editing. A hand-written `sourceRef` supplies that,
+ * and the resolver merges the two.
+ */
+export type SourceStamp = {
+  file: string;
+  function: string;
+  line: number;
+};
+
+/**
+ * A hand-written `userData.sourceRef` when a stamp is also present.
+ *
+ * Authors need only write the fields they are overriding — most often `args`
+ * alone, letting file, function and line come from the stamp.
+ */
+export type PartialSourceRef = Partial<SourceRef>;
