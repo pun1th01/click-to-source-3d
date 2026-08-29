@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useOverlayStore } from "../store/overlayStore.js";
 import { describeMesh } from "../meshDetails.js";
 import { MeshDetails } from "./MeshDetails.js";
@@ -61,6 +61,7 @@ export function GenerationTrace() {
   const [savingArg, setSavingArg] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const bodyRef = useRef<HTMLDivElement>(null);
 
   const meshDetails = useMemo(
     () => describeMesh(selectedObject, instanceId),
@@ -68,6 +69,12 @@ export function GenerationTrace() {
   );
 
   useEffect(() => {
+    // A new selection starts at the top. Without this the panel opens
+    // mid-scroll wherever the previous object left it.
+    if (bodyRef.current) {
+      bodyRef.current.scrollTop = 0;
+    }
+
     if (!sourceRef) {
       setDraftArgs({});
       return;
@@ -138,6 +145,16 @@ export function GenerationTrace() {
         top: 20,
         right: 20,
         width: 300,
+        // Content ranges from ~330px to ~880px depending on arg count and
+        // whether the mesh disclosure is open, so the cap has to be
+        // viewport-relative. 40px leaves the same 20px gap at the bottom as
+        // the top offset above.
+        maxHeight: "calc(100vh - 40px)",
+        // max-height applies to the content box, so without this the 16px
+        // padding is added on top of the cap and the card still overruns.
+        boxSizing: "border-box",
+        display: "flex",
+        flexDirection: "column",
         backgroundColor: "rgba(30, 30, 30, 0.9)",
         color: "#ffffff",
         padding: "16px",
@@ -150,6 +167,7 @@ export function GenerationTrace() {
     >
       <div
         style={{
+          flexShrink: 0,
           display: "flex",
           justifyContent: "space-between",
           alignItems: "center",
@@ -175,7 +193,18 @@ export function GenerationTrace() {
         </button>
       </div>
 
-      <div style={{ fontSize: "13px", lineHeight: "1.5" }}>
+      <div
+        ref={bodyRef}
+        style={{
+          fontSize: "13px",
+          lineHeight: "1.5",
+          flex: 1,
+          minHeight: 0,
+          overflowY: "auto",
+          scrollbarWidth: "thin",
+          scrollbarColor: "#555 transparent",
+        }}
+      >
         <div style={{ marginBottom: "8px" }}>
           <strong style={{ color: "#a8c7fa" }}>File:</strong> {sourceRef.file}
         </div>
@@ -247,7 +276,12 @@ export function GenerationTrace() {
           open={meshDetailsOpen}
           onToggle={setMeshDetailsOpen}
         />
+      </div>
 
+      {/* Outside the scrolling body on purpose: feedback about a save must
+          stay visible even when the body is scrolled away from the Save
+          button that produced it. */}
+      <div style={{ flexShrink: 0, fontSize: "13px", lineHeight: "1.5" }}>
         {status && (
           <div role="status" style={{ color: "#9fe6a0", marginTop: "10px" }}>
             {status}
