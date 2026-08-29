@@ -5,6 +5,7 @@ import {
   handleFileRequest,
   type FileRequestOptions,
 } from "./middleware.js";
+import { stampSource } from "./stampSource.js";
 
 export type ClickToSourceOptions = {
   /**
@@ -17,6 +18,28 @@ export type ClickToSourceOptions = {
    * server's own. Defaults to none.
    */
   allowedOrigins?: string[];
+  /**
+   * Stamp every host element with its source location into
+   * `userData.__ctsSource`, so file, function and line no longer have to be
+   * hand-written into `userData.sourceRef`.
+   *
+   * Emitted paths are always relative to the Vite root, in dev as well as in
+   * a build. The panel displays whatever it resolves, so an absolute path
+   * would put the developer's home directory on screen in every screenshot
+   * and shared session.
+   *
+   * `true` stamps in dev only. `"always"` also stamps production builds —
+   * off by default, and not merely to save bytes: a stamp names a source file
+   * and the component that produced it, so shipping one publishes your
+   * project's file layout and internal component names to every visitor, with
+   * no user-facing benefit, since the overlay that reads these is not in a
+   * production bundle.
+   *
+   * Requires this plugin to be listed BEFORE the React plugin. Both declare
+   * enforce: "pre", so Vite preserves array order between them, and a React
+   * plugin running first leaves no JSX to stamp.
+   */
+  stampSource?: boolean | "always";
 };
 
 /**
@@ -35,11 +58,49 @@ export function clickToSource(options: ClickToSourceOptions = {}): Plugin {
     allowedOrigins: options.allowedOrigins ?? [],
   };
 
+  const stamping = options.stampSource ?? false;
+  let warnedAboutOrder = false;
+
   return {
     name: "click-to-source",
-    apply: "serve",
+    // Same bucket as the React plugin, which also declares "pre". Vite keeps
+    // user array order within a bucket, so this plugin has to be listed first
+    // for any JSX to still be here when transform runs.
+    enforce: "pre",
+    apply(_config, env) {
+      // The endpoints are dev-only. The build is entered only to stamp, and
+      // only when the caller opted into production stamping.
+      return env.command === "serve" || stamping === "always";
+    },
     configResolved(config) {
       resolvedConfig = config;
+    },
+    transform(code, id) {
+      if (!stamping) {
+        return null;
+      }
+      if (resolvedConfig.command === "build" && stamping !== "always") {
+        return null;
+      }
+      if (!/\.[jt]sx$/.test(id.split("?")[0])) {
+        return null;
+      }
+
+      if (!warnedAboutOrder && !code.includes("<")) {
+        // A .jsx file with no JSX left in it means something transformed it
+        // first — almost always the React plugin listed ahead of this one.
+        // Silently stamping nothing is the worst outcome, so say so once.
+        warnedAboutOrder = true;
+        this.warn(
+          "click-to-source: no JSX found in " +
+            id +
+            ". List clickToSource() before the React plugin in your Vite " +
+            "config, or source stamping will do nothing."
+        );
+        return null;
+      }
+
+      return stampSource(code, id.split("?")[0], { root: resolvedConfig.root });
     },
     configureServer(server) {
       server.middlewares.use((request, response, next) => {
