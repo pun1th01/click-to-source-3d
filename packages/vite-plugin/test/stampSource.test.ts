@@ -121,3 +121,48 @@ describe("stampSource", () => {
     expect(out).toContain("__ctsSource:");
   });
 });
+
+describe("stampSource — DOM elements", () => {
+  // Lowercase JSX covers DOM tags as well as R3F intrinsics. Stamping a <div>
+  // puts a userData attribute on a DOM node, which React warns about at
+  // runtime and which carries no meaning.
+  it("does not stamp HTML elements", () => {
+    const result = stampSource(
+      "const P = () => <div><button /><span /><label /></div>;",
+      FILE,
+      { root: ROOT }
+    );
+
+    expect(result).toBeNull();
+  });
+
+  it("does not stamp SVG elements", () => {
+    expect(
+      stampSource("const I = () => <svg><path /><circle /></svg>;", FILE, {
+        root: ROOT,
+      })
+    ).toBeNull();
+  });
+
+  it("still stamps three elements sharing no name with the DOM", () => {
+    const out = stampSource(
+      "const S = () => <div><mesh /><instancedMesh /></div>;",
+      FILE,
+      { root: ROOT }
+    );
+
+    expect(out!.code).toContain("<mesh userData=");
+    expect(out!.code).toContain("<instancedMesh userData=");
+    expect(out!.code).not.toContain("<div userData=");
+  });
+
+  // R3F applications register their own lowercase elements via extend(), so
+  // an allowlist of known three classes would silently miss them.
+  it("stamps an application's own extended element", () => {
+    const out = stampSource("const W = () => <waterSurface />;", FILE, {
+      root: ROOT,
+    });
+
+    expect(out!.code).toContain("<waterSurface userData=");
+  });
+});

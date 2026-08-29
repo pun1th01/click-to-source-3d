@@ -9,6 +9,37 @@ import MagicString from "magic-string";
  */
 const SKIPPED_SUFFIXES = ["Geometry", "Material"];
 
+/**
+ * Lowercase JSX means "host element", which in a React app covers DOM tags as
+ * well as R3F intrinsics — the two are indistinguishable by case alone.
+ * Stamping a <div> puts a userData attribute on a DOM node, which React warns
+ * about and which means nothing.
+ *
+ * A denylist rather than an allowlist of three elements: the HTML and SVG tag
+ * sets are fixed and knowable, while the R3F set is open-ended because
+ * `extend()` lets an application register its own, as this project's own
+ * <waterMaterial> does.
+ */
+const DOM_TAGS = new Set([
+  "a", "abbr", "address", "area", "article", "aside", "audio", "b", "base",
+  "bdi", "bdo", "big", "blockquote", "body", "br", "button", "canvas",
+  "caption", "cite", "code", "col", "colgroup", "data", "datalist", "dd",
+  "del", "details", "dfn", "dialog", "div", "dl", "dt", "em", "embed",
+  "fieldset", "figcaption", "figure", "footer", "form", "h1", "h2", "h3",
+  "h4", "h5", "h6", "head", "header", "hgroup", "hr", "html", "i", "iframe",
+  "img", "input", "ins", "kbd", "label", "legend", "li", "link", "main",
+  "map", "mark", "menu", "meta", "meter", "nav", "noscript", "object", "ol",
+  "optgroup", "option", "output", "p", "param", "picture", "pre", "progress",
+  "q", "rp", "rt", "ruby", "s", "samp", "script", "section", "select",
+  "slot", "small", "source", "span", "strong", "style", "sub", "summary",
+  "sup", "table", "tbody", "td", "template", "textarea", "tfoot", "th",
+  "thead", "time", "title", "tr", "track", "u", "ul", "var", "video", "wbr",
+  // SVG, which React also treats as host elements
+  "circle", "clipPath", "defs", "ellipse", "foreignObject", "g", "image",
+  "line", "linearGradient", "marker", "mask", "path", "pattern", "polygon",
+  "polyline", "radialGradient", "rect", "stop", "svg", "text", "tspan",
+]);
+
 export type StampOptions = {
   /** Absolute path the emitted `file` values are made relative to. */
   root: string;
@@ -30,6 +61,10 @@ function isHostElement(name: string): boolean {
 
 function isStampable(name: string): boolean {
   if (!isHostElement(name)) {
+    return false;
+  }
+
+  if (DOM_TAGS.has(name)) {
     return false;
   }
 
@@ -179,9 +214,17 @@ export function stampSource(
     );
 
     if (!existing) {
-      // Insert before the closing bracket of the opening element.
+      // Insert before the closing bracket of the opening element. A
+      // self-closing tag already has a space before its slash, so only add one
+      // when the preceding character is not whitespace.
       const insertAt = (element.end as number) - (element.selfClosing ? 2 : 1);
-      magic.appendLeft(insertAt, ` userData={{ __ctsSource: ${stamp} }}`);
+      const needsSpace = !/\s/.test(code[insertAt - 1] ?? "");
+      magic.appendLeft(
+        insertAt,
+        `${needsSpace ? " " : ""}userData={{ __ctsSource: ${stamp} }}${
+          element.selfClosing ? " " : ""
+        }`
+      );
       return true;
     }
 
