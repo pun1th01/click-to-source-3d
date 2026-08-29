@@ -7,6 +7,8 @@ import {
 } from "./middleware.js";
 import { stampSource } from "./stampSource.js";
 
+const PROBE_MODULE_ID = "virtual:click-to-source-probe";
+
 export type ClickToSourceOptions = {
   /**
    * File extensions the editor may read and write. Replaces the default set
@@ -40,6 +42,21 @@ export type ClickToSourceOptions = {
    * plugin running first leaves no JSX to stamp.
    */
   stampSource?: boolean | "always";
+  /**
+   * Install the instance capture probe, so per-instance args for a
+   * hand-rolled InstancedMesh are recovered from the writes themselves
+   * instead of a hand-maintained instanceSourceRefs array.
+   *
+   * Injected as a module script ahead of the application entry, because
+   * instance writes are once-only with no replay: a probe that arrives after
+   * the first scene commits captures nothing, and does so silently.
+   *
+   * Dev only, and not offered for production. The probe patches
+   * InstancedMesh.prototype.setMatrixAt and Matrix4.prototype.clone
+   * process-globally, which every InstancedMesh in the process then pays for,
+   * including drei's Cloud, Sampler, Instances and Outlines.
+   */
+  captureInstances?: boolean;
 };
 
 /**
@@ -59,6 +76,7 @@ export function clickToSource(options: ClickToSourceOptions = {}): Plugin {
   };
 
   const stamping = options.stampSource ?? false;
+  const capturing = options.captureInstances ?? false;
   let warnedAboutOrder = false;
 
   return {
@@ -102,6 +120,45 @@ export function clickToSource(options: ClickToSourceOptions = {}): Plugin {
 
       return stampSource(code, id.split("?")[0], { root: resolvedConfig.root });
     },
+    transformIndexHtml: {
+      order: "pre",
+      handler(_html, ctx) {
+        // Dev only: in a build there is no overlay to read the records, and
+        // the patch would be shipped to every visitor.
+        if (!capturing || !ctx.server) {
+          return;
+        }
+
+        // A module script ahead of the application entry. Module scripts run
+        // in document order, so the probe is live before any scene mounts —
+        // the one thing this mechanism cannot recover from getting wrong,
+        // since instance writes are once-only with no replay.
+        //
+        // It points at a virtual module this plugin serves rather than at the
+        // package directly. A bare specifier is not resolvable from an HTML
+        // src, and hard-coding a path would put the probe in a different
+        // module graph from the application, where its patches would apply to
+        // a different copy of three.
+        return [
+          {
+            tag: "script",
+            attrs: { type: "module", src: `/@id/__x00__${PROBE_MODULE_ID}` },
+            injectTo: "head-prepend" as const,
+          },
+        ];
+      },
+    },
+
+    resolveId(id) {
+      return id === PROBE_MODULE_ID ? `\0${PROBE_MODULE_ID}` : null;
+    },
+
+    load(id) {
+      return id === `\0${PROBE_MODULE_ID}`
+        ? 'import "@click-to-source/core/probe";'
+        : null;
+    },
+
     configureServer(server) {
       server.middlewares.use((request, response, next) => {
         let pathname: string;
