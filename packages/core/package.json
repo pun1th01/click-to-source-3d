@@ -9,6 +9,10 @@
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
     },
+    "./probe": {
+      "types": "./dist/probe.d.ts",
+      "default": "./dist/probe.js"
+    },
     "./package.json": "./package.json"
   },
   "main": "dist/index.js",

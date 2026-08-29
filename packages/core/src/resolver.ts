@@ -4,6 +4,10 @@ import {
   InstanceSourceRef,
   SourceStamp,
 } from "@click-to-source/shared";
+import {
+  getInstanceRecord,
+  instanceSourceRefFrom,
+} from "./instanceCapture.js";
 
 /**
  * The core resolution result providing both the intersected object
@@ -55,6 +59,59 @@ function resolveInstanceSourceRef(
 }
 
 /**
+ * Per-instance resolution from transforms captured by the instance probe.
+ *
+ * Runs only after the hand-written array has been consulted, and is decided
+ * per instance rather than per mesh. A partially populated
+ * `instanceSourceRefs` — fewer entries than the mesh has instances — must not
+ * cost the uncovered slots their provenance: the existing out-of-bounds path
+ * already degrades per instance, and mesh-level precedence would step past
+ * captured data that is present and correct in favour of something less
+ * specific.
+ *
+ * The location comes from the mesh's own provenance, since a captured
+ * transform knows the values but not the call site that produced them.
+ */
+function resolveCapturedInstance(
+  object: THREE.Object3D,
+  instanceId: number | undefined
+): ResolutionResult | null {
+  if (instanceId === undefined || instanceId === null) {
+    return null;
+  }
+
+  const record = getInstanceRecord(object, instanceId);
+
+  if (!record) {
+    return null;
+  }
+
+  const manual = object.userData?.sourceRef as Partial<SourceRef> | undefined;
+  const stamp = object.userData?.__ctsSource as SourceStamp | undefined;
+  const location = { ...(stamp ?? {}), ...(manual ?? {}) } as Partial<SourceRef>;
+
+  if (!location.file || !location.function || location.line === undefined) {
+    // Nothing names the call site, so a transform alone would be provenance
+    // with no provenance. Fall through to the ordinary walk.
+    return null;
+  }
+
+  return {
+    object,
+    sourceRef: instanceSourceRefFrom(
+      {
+        file: location.file,
+        function: location.function,
+        line: location.line,
+      },
+      record
+    ),
+    instanceId,
+    readonly: true,
+  };
+}
+
+/**
  * Resolves the SourceRef metadata by inspecting a specific object
  * and walking up its parent chain if necessary.
  *
@@ -71,10 +128,19 @@ export function resolveSourceRef(
   object: THREE.Object3D,
   instanceId?: number
 ): ResolutionResult | null {
-  // Fast path: per-instance resolution for InstancedMesh objects.
+  // Per-instance resolution, most specific source first. Hand-written entries
+  // outrank captured ones for the same reason manual outranks stamped
+  // elsewhere, and for one more: the probe cannot always tell a stale slot
+  // from a live one on a mesh whose instance count shrank, whereas an
+  // authored array has no such failure mode.
   const instanceResult = resolveInstanceSourceRef(object, instanceId);
   if (instanceResult) {
     return instanceResult;
+  }
+
+  const capturedResult = resolveCapturedInstance(object, instanceId);
+  if (capturedResult) {
+    return capturedResult;
   }
 
   // Standard path: two passes up the parent chain. Manual provenance anywhere
