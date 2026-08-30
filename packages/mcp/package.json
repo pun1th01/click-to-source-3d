@@ -1,0 +1,44 @@
+{
+  "name": "@click-to-source/mcp",
+  "version": "0.1.0",
+  "description": "MCP server exposing Click-to-Source 3D provenance to coding agents",
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "bin": {
+    "click-to-source-mcp": "dist/server.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "scripts": {
+    "clean": "node -e \"const f=require('fs');f.rmSync('dist',{recursive:true,force:true});f.rmSync('tsconfig.tsbuildinfo',{force:true})\"",
+    "build": "tsc -b",
+    "prepack": "npm run clean && tsc -b",
+    "prepublishOnly": "npm run test",
+    "pretest": "tsc -b",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@click-to-source/shared": "0.1.0",
+    "@modelcontextprotocol/sdk": "^1.30.0"
+  },
+  "devDependencies": {
+    "@types/node": "^26.2.0",
+    "vitest": "^4.1.11"
+  }
+}

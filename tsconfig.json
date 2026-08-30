@@ -15,7 +15,8 @@
     { "path": "packages/shared" },
     { "path": "packages/core" },
     { "path": "packages/overlay" },
-    { "path": "packages/vite-plugin" }
+    { "path": "packages/vite-plugin" },
+    { "path": "packages/mcp" }
   ],
   "exclude": ["node_modules", "dist"]
 }
