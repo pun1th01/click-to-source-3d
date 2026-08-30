@@ -26,10 +26,21 @@ let source: EventSource | null = null;
 /**
  * Incremented whenever a scene is attached.
  *
- * An agent passes back the generation it last saw. A mismatch does not
- * invalidate the answer — an address derived from source still resolves
- * across a remount — but it is reported, so "the world rebuilt underneath
- * you" is never silent.
+ * This is not a staleness check, and cannot be used as one. Two measured
+ * limits, both of which look like the opposite of what the name suggests:
+ *
+ * It does not survive a reload. The counter lives in module scope, so a new
+ * document starts it again — measured at 1 both before and after a full
+ * page reload, with no mismatch for a caller to notice.
+ *
+ * It does not move when the world regenerates. R3F keeps the same scene
+ * object, so nothing re-attaches. Measured across a seed change: the same
+ * held address answered `ready` with generation still 1, describing a
+ * different tree — x -84.967 where it had been -8.651.
+ *
+ * So a held address can silently resolve to a different object. What the
+ * counter does distinguish is one remount from another *within* a single
+ * document, which is all it should be read as saying.
  */
 let generation = 0;
 
