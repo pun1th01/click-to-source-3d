@@ -18,6 +18,7 @@ export {
 } from "./scanProvenance.js";
 export {
   resolveAtPoint,
-  BridgeUnavailableError,
-  type BridgeState,
+  getInstanceProvenance,
+  listSceneProvenance,
+  type BridgeOutcome,
 } from "./bridge.js";

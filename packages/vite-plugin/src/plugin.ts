@@ -1,4 +1,13 @@
-import { READ_FILE_PATH, WRITE_FILE_PATH } from "@click-to-source/shared";
+import {
+  BRIDGE_EVENTS_PATH,
+  BRIDGE_QUERY_PATH,
+  BRIDGE_REPLY_PATH,
+  READ_FILE_PATH,
+  WRITE_FILE_PATH,
+} from "@click-to-source/shared";
+import type { BridgeQuery } from "@click-to-source/shared";
+import { BridgeHub } from "./bridgeHub.js";
+import type { IncomingMessage, ServerResponse } from "node:http";
 import type { Plugin, ResolvedConfig } from "vite";
 import {
   DEFAULT_ALLOWED_EXTENSIONS,
@@ -8,6 +17,38 @@ import {
 import { stampSource } from "./stampSource.js";
 
 const PROBE_MODULE_ID = "virtual:click-to-source-probe";
+
+/** Reads a JSON body, runs a handler, and writes the JSON result. */
+async function handleBridgePost(
+  request: IncomingMessage,
+  response: ServerResponse,
+  handler: (body: unknown) => unknown | Promise<unknown>
+): Promise<void> {
+  const chunks: Buffer[] = [];
+
+  for await (const chunk of request) {
+    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+  }
+
+  let body: unknown = {};
+
+  try {
+    body = JSON.parse(Buffer.concat(chunks).toString("utf8") || "{}");
+  } catch {
+    response.statusCode = 400;
+    response.setHeader("Content-Type", "application/json");
+    response.end(JSON.stringify({ error: "Invalid JSON body" }));
+    return;
+  }
+
+  const result = await handler(body);
+  const payload = JSON.stringify(result);
+
+  response.statusCode = 200;
+  response.setHeader("Content-Type", "application/json; charset=utf-8");
+  response.setHeader("Content-Length", Buffer.byteLength(payload));
+  response.end(payload);
+}
 
 export type ClickToSourceOptions = {
   /**
@@ -57,6 +98,17 @@ export type ClickToSourceOptions = {
    * including drei's Cloud, Sampler, Instances and Outlines.
    */
   captureInstances?: boolean;
+  /**
+   * Open the scene bridge, letting an out-of-process client ask the running
+   * page about its own contents.
+   *
+   * Off by default and dev only. Always-on would mean every dev server holds
+   * an event stream and serialises scene state for a tool nobody is running.
+   *
+   * Requires <ClickToSourceBridge /> inside the Canvas: the bridge needs a
+   * scene and a camera, which only a component inside the R3F tree can supply.
+   */
+  bridge?: boolean;
 };
 
 /**
@@ -77,6 +129,8 @@ export function clickToSource(options: ClickToSourceOptions = {}): Plugin {
 
   const stamping = options.stampSource ?? false;
   const capturing = options.captureInstances ?? false;
+  const bridging = options.bridge ?? false;
+  const hub = new BridgeHub();
   let warnedAboutOrder = false;
 
   return {
@@ -160,6 +214,10 @@ export function clickToSource(options: ClickToSourceOptions = {}): Plugin {
     },
 
     configureServer(server) {
+      if (bridging) {
+        server.httpServer?.on("close", () => hub.dispose());
+      }
+
       server.middlewares.use((request, response, next) => {
         let pathname: string;
 
@@ -167,6 +225,41 @@ export function clickToSource(options: ClickToSourceOptions = {}): Plugin {
           pathname = new URL(request.url ?? "/", "http://localhost").pathname;
         } catch {
           next();
+          return;
+        }
+
+        if (bridging && pathname === BRIDGE_EVENTS_PATH) {
+          hub.handleEvents(request, response);
+          return;
+        }
+
+        if (bridging && pathname === BRIDGE_REPLY_PATH) {
+          void handleBridgePost(request, response, (body) => {
+            hub.handleReply(body as { requestId?: string; result?: unknown });
+            return { ok: true };
+          });
+          return;
+        }
+
+        if (pathname === BRIDGE_QUERY_PATH) {
+          void handleBridgePost(request, response, async (body) => {
+            if (!bridging) {
+              return {
+                status: "disabled",
+                reason:
+                  "The scene bridge is off. Pass bridge: true to clickToSource() " +
+                  "and add <ClickToSourceBridge /> inside your Canvas.",
+              };
+            }
+
+            const { query, pageId, timeoutMs } = body as {
+              query: BridgeQuery;
+              pageId?: number;
+              timeoutMs?: number;
+            };
+
+            return hub.query(query, { pageId, timeoutMs });
+          });
           return;
         }
 

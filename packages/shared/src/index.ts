@@ -96,3 +96,51 @@ export type SourceStamp = {
  * alone, letting file, function and line come from the stamp.
  */
 export type PartialSourceRef = Partial<SourceRef>;
+
+/**
+ * Bridge transport paths.
+ *
+ * Three channels rather than a WebSocket. A socket would be the obvious
+ * choice for request/response, but the only usable server implementation
+ * would be a new dependency in `@click-to-source/vite-plugin`, which
+ * otherwise carries three. The lifecycle that matters here — close observed
+ * before reconnect on a full reload — was measured on this transport and is
+ * the same either way.
+ */
+export const BRIDGE_EVENTS_PATH = "/__cts/bridge/events";
+export const BRIDGE_REPLY_PATH = "/__cts/bridge/reply";
+export const BRIDGE_QUERY_PATH = "/__cts/bridge/query";
+
+/**
+ * Where a thing came from, as an address in source rather than an object
+ * identity.
+ *
+ * `Object3D.uuid` is regenerated on construction, so a remount invalidates
+ * every uuid an agent holds — measured at 8 distinct uuids becoming 11 after
+ * one edit. An address derived from the stamped call site survives that,
+ * because it changes only when the code changes.
+ *
+ * `ordinal` disambiguates the several meshes one JSX element can produce: a
+ * map over colour groups yields three meshes all stamped at the same line,
+ * in deterministic order.
+ */
+export type ProvenanceAddress = {
+  file: string;
+  function: string;
+  line: number;
+  ordinal: number;
+  /** Present when addressing one instance within an InstancedMesh. */
+  instanceId?: number;
+};
+
+/** Lifecycle of the page the bridge talks to. */
+export type BridgeStatus =
+  | "disconnected"
+  | "no_scene"
+  | "ambiguous"
+  | "ready";
+
+export type BridgeQuery =
+  | { kind: "resolve_at_point"; x: number; y: number }
+  | { kind: "get_instance_provenance"; address: ProvenanceAddress }
+  | { kind: "list_scene_provenance" };

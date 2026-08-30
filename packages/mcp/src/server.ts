@@ -5,7 +5,11 @@ import {
   CallToolRequestSchema,
   ListToolsRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
-import { BridgeUnavailableError, resolveAtPoint } from "./bridge.js";
+import {
+  getInstanceProvenance,
+  listSceneProvenance,
+  resolveAtPoint,
+} from "./bridge.js";
 import {
   DevServerError,
   DevServerTimeoutError,
@@ -83,18 +87,55 @@ const TOOLS = [
   {
     name: "resolve_at_point",
     description:
-      "RESERVED, not yet available. Would resolve the object under a screen " +
-      "point in the running scene. Requires a browser bridge that is not " +
-      "built: nothing outside the page can hold a THREE.Object3D. Returns a " +
-      "terminal error — retrying will not help. Use list_provenance for the " +
-      "source-side view.",
+      "Resolve whatever is under a point in the RUNNING scene. Coordinates are " +
+      "normalised device coordinates, -1 to 1. Needs the app open in a browser " +
+      "with bridge: true and <ClickToSourceBridge /> in the Canvas. Reports " +
+      "disconnected, no_scene, ambiguous or timeout rather than failing " +
+      "silently — each has a different remedy.",
     inputSchema: {
       type: "object",
       properties: {
-        x: { type: "number", description: "Normalised device coordinate, -1 to 1" },
-        y: { type: "number", description: "Normalised device coordinate, -1 to 1" },
+        x: { type: "number", description: "-1 (left) to 1 (right)" },
+        y: { type: "number", description: "-1 (bottom) to 1 (top)" },
+        pageId: { type: "number", description: "Required when several pages are open" },
       },
       required: ["x", "y"],
+    },
+  },
+  {
+    name: "list_scene_provenance",
+    description:
+      "Every stamped object currently in the running scene, with its address " +
+      "and instance count. Unlike list_provenance this reports what is " +
+      "rendered, not what the source declares — which is the only way to see " +
+      "instanced objects, since their provenance exists at runtime only.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        pageId: { type: "number" },
+      },
+    },
+  },
+  {
+    name: "get_instance_provenance",
+    description:
+      "Provenance for one addressed object, or one instance within an " +
+      "InstancedMesh. Addresses come from list_scene_provenance and are " +
+      "{file, function, line, ordinal} — derived from the source location " +
+      "rather than from Object3D.uuid, which is regenerated on every remount. " +
+      "Read-only: an instance's transform comes from a seeded RNG, so no " +
+      "literal in source corresponds to it.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        file: { type: "string" },
+        function: { type: "string" },
+        line: { type: "number" },
+        ordinal: { type: "number", description: "Which object at that call site, from 0" },
+        instanceId: { type: "number", description: "Slot within an InstancedMesh" },
+        pageId: { type: "number" },
+      },
+      required: ["file", "function", "line", "ordinal"],
     },
   },
   {
@@ -140,8 +181,32 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         result = await searchByGenerator(context, args as never);
         break;
       case "resolve_at_point":
-        resolveAtPoint();
+        result = await resolveAtPoint(context, args as never);
         break;
+      case "list_scene_provenance":
+        result = await listSceneProvenance(context, args as never);
+        break;
+      case "get_instance_provenance": {
+        const a = args as unknown as {
+          file: string;
+          function: string;
+          line: number;
+          ordinal: number;
+          instanceId?: number;
+          pageId?: number;
+        };
+        result = await getInstanceProvenance(context, {
+          address: {
+            file: a.file,
+            function: a.function,
+            line: a.line,
+            ordinal: a.ordinal,
+            instanceId: a.instanceId,
+          },
+          pageId: a.pageId,
+        });
+        break;
+      }
       default:
         throw new Error(`Unknown tool: ${request.params.name}`);
     }
@@ -155,9 +220,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     // actionable: a wrong line is recoverable, a missing dev server is not
     // recoverable by retrying.
     const detail =
-      error instanceof BridgeUnavailableError
-        ? error.message
-        : error instanceof DevServerError
+      error instanceof DevServerError
         ? `${error.message}${error.code ? ` (${error.code})` : ""}`
         : error instanceof DevServerTimeoutError ||
             error instanceof DevServerUnreachableError

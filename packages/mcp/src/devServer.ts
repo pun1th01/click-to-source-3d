@@ -85,7 +85,7 @@ export class DevServerUnreachableError extends Error {
   }
 }
 
-async function post(
+export async function postJson(
   options: DevServerOptions,
   path: string,
   body: unknown
@@ -149,7 +149,7 @@ export async function readSourceFile(
   options: DevServerOptions,
   file: string
 ): Promise<string> {
-  const payload = await post(options, READ_FILE_PATH, { file });
+  const payload = await postJson(options, READ_FILE_PATH, { file });
 
   if (typeof payload.content !== "string") {
     throw new DevServerError("Read response contained no source content", 500);
@@ -170,5 +170,5 @@ export async function editParameter(
   options: DevServerOptions,
   edit: { file: string; line: number; argName: string; newValue: unknown }
 ): Promise<void> {
-  await post(options, WRITE_FILE_PATH, edit);
+  await postJson(options, WRITE_FILE_PATH, edit);
 }
