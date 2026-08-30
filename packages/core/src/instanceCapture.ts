@@ -300,6 +300,31 @@ export function getInstanceRecord(
 }
 
 /**
+ * Whether the probe ever recorded a write for this mesh.
+ *
+ * Distinguishes two failures that `getInstanceRecord` returns null for
+ * alike, and which need opposite responses. A mesh the probe never saw was
+ * placed before the probe was installed, or with capture switched off, and
+ * no amount of retrying will help. A mesh with records where one slot is
+ * missing has been swept, and a different slot may still resolve.
+ *
+ * Reported rather than inferred, because guessing the first case as the
+ * second tells a consumer their instance count changed when in fact nothing
+ * was ever captured.
+ */
+export function hasInstanceRecords(mesh: THREE.Object3D): boolean {
+  const instanced = mesh as THREE.InstancedMesh;
+
+  if (!instanced.isInstancedMesh) {
+    return false;
+  }
+
+  const meshRecords = records.get(instanced);
+
+  return meshRecords !== undefined && meshRecords.size > 0;
+}
+
+/**
  * Builds the SourceRef an instance resolves to, given the location its mesh
  * already carries and the transform captured for the slot.
  */

@@ -6,7 +6,11 @@ import {
   type ProvenanceAddress,
   type SourceStamp,
 } from "@click-to-source/shared";
-import { getInstanceRecord } from "./instanceCapture.js";
+import {
+  getInstanceRecord,
+  getProbeStats,
+  hasInstanceRecords,
+} from "./instanceCapture.js";
 import { resolveSourceRef } from "./resolver.js";
 
 /**
@@ -142,7 +146,14 @@ function describe(object: THREE.Object3D, ordinal: number) {
   };
 }
 
-function answer(query: BridgeQuery): unknown {
+/**
+ * Answers one query against the attached scene.
+ *
+ * Exported because this is the function the event stream calls, so a test
+ * that drives it is exercising the shipped path. A test against a stand-in
+ * for the bridge would pass whether or not this logic is right.
+ */
+export function answerBridgeQuery(query: BridgeQuery): unknown {
   if (!handle) {
     return { status: "no_scene", generation };
   }
@@ -223,14 +234,51 @@ function answer(query: BridgeQuery): unknown {
   const record = getInstanceRecord(mesh, instanceId);
 
   if (!record) {
+    // Four different situations produce a null record, and they need
+    // opposite responses. Collapsing them into one message is what made this
+    // misleading: a consumer who never switched capture on was told their
+    // instance count had changed, which is a confident explanation of
+    // something that never happened.
+    //
+    // `cause` is the machine-readable half. An agent should branch on it
+    // rather than parse the prose, which is why it is not merely a reworded
+    // reason string.
+    const { cause, reason } = !getProbeStats().installed
+      ? {
+          cause: "probe_not_installed",
+          reason:
+            "the instance capture probe is not installed, so no transform was " +
+            "ever recorded for any mesh. Pass captureInstances: true to " +
+            "clickToSource(), or import @click-to-source/core/probe as the " +
+            "first statement of the entry module.",
+        }
+      : instanceId >= mesh.count
+        ? {
+            cause: "instance_out_of_range",
+            reason: `instanceId ${instanceId} is past the mesh's current count of ${mesh.count}.`,
+          }
+        : !hasInstanceRecords(mesh)
+          ? {
+              cause: "no_records_for_mesh",
+              reason:
+                "the probe is installed but never saw a write for this mesh, " +
+                "so its instances were placed before the probe was live. The " +
+                "probe must execute before any scene mounts.",
+            }
+          : {
+              cause: "record_swept",
+              reason:
+                "this slot's record belongs to a generation that is gone. The " +
+                "mesh's instance count changed since the slot was written, and " +
+                "a stale transform is worse than none.",
+            };
+
     return {
       status: "instance_not_recorded",
       generation,
       count: mesh.count,
-      reason:
-        instanceId >= mesh.count
-          ? "instanceId is past the mesh's current count"
-          : "no live record for this slot; the mesh's instance count changed since it was written",
+      cause,
+      reason,
     };
   }
 
@@ -307,7 +355,7 @@ export function connectBridge(): () => void {
     let result: unknown;
 
     try {
-      result = answer(envelope.query);
+      result = answerBridgeQuery(envelope.query);
     } catch (error) {
       result = {
         status: "error",
