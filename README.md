@@ -50,6 +50,41 @@ Architecture documents, research, and technical approach documents are available
 
 For the full roadmap, see [`docs/roadmap/`](docs/roadmap/).
 
+## Overlay components and the render loop
+
+Two components have requirements that are invisible from their call sites,
+because when either is unmet the result is a component that renders nothing
+and says nothing. Both were found by consumers rather than by tests.
+
+### `<SelectionHighlight />`
+
+Draws the selection outline through an `EffectComposer`, on a `useFrame`
+subscription at **priority 1**. Any priority above zero makes R3F stop
+rendering the scene itself and hand the job to the subscriber, so this
+component becomes the renderer.
+
+- It does **not** compose with other post-processing that also claims a
+  priority. Whichever renders last wins and the other's output is discarded.
+- Under `frameloop="demand"` it works: it calls `invalidate()` whenever the
+  selection changes. Before that it silently did not, because the selection
+  arrives from a store R3F does not observe, so no frame was ever scheduled.
+- Under `frameloop="never"` it cannot work — your application drives frames,
+  so call `advance()` after changing the selection. It warns once in
+  development rather than failing silently.
+
+There is no requirement on the `gl` prop. A bare `<Canvas>` is fine.
+
+### `<ClickToSourceBridge />`
+
+Answers queries about the running scene, and must be inside the `Canvas`,
+since only a component in the R3F tree can supply a scene and a camera.
+
+It answers only while the page is actually rendering. R3F does not render
+`Canvas` children in a hidden or background tab, so the component never
+mounts and every bridge query reports `disconnected` — indistinguishable
+from no page being open. This matters when driving the app headlessly: keep
+the page visible, or expect `disconnected`.
+
 ## Repository Structure
 
 ```
