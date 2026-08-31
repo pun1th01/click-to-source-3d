@@ -51,7 +51,7 @@ The audit specifically checks that provenance is:
 
 ### Exp1 — Single Cube
 
-[Exp1_SingleCube.jsx](file:///c:/Users/sarma/OneDrive/Desktop/My%20FIles/My%20Project/experimentalFolder/click-to-source-poc/src/Exp1_SingleCube.jsx)
+`Exp1_SingleCube.jsx` (Stage 1 proof-of-concept, not in this repository)
 
 The `TaggedCube` component returns a `<mesh>` element with `userData={{ sourceRef: { file, function, line, args } }}` written directly as a JSX prop. The `sourceRef` is an inline object literal — no indirection, no imperative assignment. The `onClick` handler reads `e.object.userData.sourceRef` but never writes to it.
 
@@ -59,7 +59,7 @@ The `TaggedCube` component returns a `<mesh>` element with `userData={{ sourceRe
 
 ### Exp2 — Multiple Cubes
 
-[Exp2_MultipleCubes.jsx](file:///c:/Users/sarma/OneDrive/Desktop/My%20FIles/My%20Project/experimentalFolder/click-to-source-poc/src/Exp2_MultipleCubes.jsx)
+`Exp2_MultipleCubes.jsx` (Stage 1 proof-of-concept, not in this repository)
 
 The `createCube(seed)` generator function produces a descriptor object containing a `sourceRef` field. This descriptor is spread into `ClickableCube` as props. The `ClickableCube` component receives `sourceRef` as a prop and attaches it declaratively via `userData={{ sourceRef }}` on the `<mesh>` JSX element. The `onClick` handler reads but never writes.
 
@@ -67,7 +67,7 @@ The `createCube(seed)` generator function produces a descriptor object containin
 
 ### Exp3 — Re-Render
 
-[Exp3_ReRender.jsx](file:///c:/Users/sarma/OneDrive/Desktop/My%20FIles/My%20Project/experimentalFolder/click-to-source-poc/src/Exp3_ReRender.jsx)
+`Exp3_ReRender.jsx` (Stage 1 proof-of-concept, not in this repository)
 
 Identical pattern to Exp2. The `createCube(seed)` generator produces `sourceRef`. The `ClickableCube` component attaches it via `userData={{ sourceRef }}`. Unrelated state changes (`counter`) trigger parent re-renders, but the tagging mechanism is always declarative. No `useEffect` is present in this file.
 
@@ -75,7 +75,7 @@ Identical pattern to Exp2. The `createCube(seed)` generator produces `sourceRef`
 
 ### Exp4 — Mesh Recreation
 
-[Exp4_MeshRecreation.jsx](file:///c:/Users/sarma/OneDrive/Desktop/My%20FIles/My%20Project/experimentalFolder/click-to-source-poc/src/Exp4_MeshRecreation.jsx)
+`Exp4_MeshRecreation.jsx` (Stage 1 proof-of-concept, not in this repository)
 
 The `RecreatableCube` component returns a `<mesh key={version}>` with `userData={{ sourceRef: { file, function, line, args: { version } } }}` as a JSX prop. The `key={version}` forces React to unmount and remount the mesh when version changes, but the new mesh instance receives its `sourceRef` declaratively during JSX creation — not imperatively after mount.
 
@@ -83,7 +83,7 @@ The `RecreatableCube` component returns a `<mesh key={version}>` with `userData=
 
 ### Exp5 — HMR
 
-[Exp5_HMR.jsx](file:///c:/Users/sarma/OneDrive/Desktop/My%20FIles/My%20Project/experimentalFolder/click-to-source-poc/src/Exp5_HMR.jsx)
+`Exp5_HMR.jsx` (Stage 1 proof-of-concept, not in this repository)
 
 The `TaggedCube` component returns a `<mesh>` with an inline `sourceRef` object literal in the `userData` JSX prop. HMR triggers a full module re-evaluation, but the tagging mechanism is declarative — the `sourceRef` is reapplied as part of the component's render output. No `useEffect` or imperative assignment is present.
 
@@ -91,7 +91,7 @@ The `TaggedCube` component returns a `<mesh>` with an inline `sourceRef` object 
 
 ### Exp6 — Trees
 
-[Exp6_Trees.jsx](file:///c:/Users/sarma/OneDrive/Desktop/My%20FIles/My%20Project/experimentalFolder/click-to-source-poc/src/Exp6_Trees.jsx)
+`Exp6_Trees.jsx` (Stage 1 proof-of-concept, not in this repository)
 
 The `createTree(x, z, seed)` generator produces a descriptor containing a `sourceRef` field. The `TreeMesh` component renders two `<mesh>` elements (trunk and crown), each with a declarative `userData` JSX prop that spreads the base `sourceRef` and adds a `part` discriminator: `userData={{ sourceRef: { ...tree.sourceRef, part: 'trunk' } }}` and `userData={{ sourceRef: { ...tree.sourceRef, part: 'crown' } }}`. The `onClick` handler reads but never writes.
 
@@ -99,7 +99,7 @@ The `createTree(x, z, seed)` generator produces a descriptor containing a `sourc
 
 ### Exp7 — Memoized Generation
 
-[Exp7_MemoizedGeneration.jsx](file:///c:/Users/sarma/OneDrive/Desktop/My%20FIles/My%20Project/experimentalFolder/click-to-source-poc/src/Exp7_MemoizedGeneration.jsx)
+`Exp7_MemoizedGeneration.jsx` (Stage 1 proof-of-concept, not in this repository)
 
 The `MemoizedCube` component calls `createCube(seed)` inside a `useMemo` callback. The memoized result (`cubeData`) contains a `sourceRef` field. This is attached to the `<mesh>` declaratively via `userData={{ sourceRef: cubeData.sourceRef }}`. The `useMemo` controls when the data object is created, but the attachment to the mesh is always a declarative JSX prop — never an imperative assignment. The `useRef` (`prevDataRef`) is used only for object-identity tracking in console logs and never writes to `userData`.
 

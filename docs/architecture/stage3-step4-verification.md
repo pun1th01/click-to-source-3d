@@ -12,7 +12,7 @@ Step 4 is the final visual integration step before Step 5 (source-info panel ove
 
 ### OutlinePass / EffectComposer
 
-The visual highlight is implemented in [`SelectionHighlight.tsx`](file:///c:/Users/sarma/OneDrive/Desktop/My%20FIles/My%20Project/click-to-source/packages/overlay/src/components/SelectionHighlight.tsx) using Three.js postprocessing classes imported directly from `three/examples/jsm/postprocessing/`:
+The visual highlight is implemented in [`SelectionHighlight.tsx`](../../packages/overlay/src/components/SelectionHighlight.tsx) using Three.js postprocessing classes imported directly from `three/examples/jsm/postprocessing/`:
 
 - **`EffectComposer`** — Manages the postprocessing pipeline. Created once per R3F context and attached to the WebGL renderer.
 - **`RenderPass`** — Renders the scene normally as the first pass.
@@ -63,7 +63,7 @@ The component returns `null` — it is a non-visual R3F component that only part
 
 ### OrbitControls (Examples Demo Only)
 
-OrbitControls were added to the examples demo ([`main.tsx`](file:///c:/Users/sarma/OneDrive/Desktop/My%20FIles/My%20Project/click-to-source/packages/examples/src/main.tsx)) to enable camera movement testing. This is strictly a demo testing aid and is not part of `@click-to-source-3d/core` or `@click-to-source-3d/overlay`.
+OrbitControls were added to the examples demo ([`main.tsx`](../../packages/examples/src/main.tsx)) to enable camera movement testing. This is strictly a demo testing aid and is not part of `@click-to-source-3d/core` or `@click-to-source-3d/overlay`.
 
 Implementation:
 
