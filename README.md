@@ -1,6 +1,6 @@
 # Click-to-Source 3D
 
-**Source-level debugging for Three.js & React Three Fiber.**
+**Source-level debugging for React Three Fiber.**
 
 ---
 
@@ -22,33 +22,93 @@ Unlike DOM-focused click-to-source tools or general Three.js scene inspectors, t
 
 ## Current Status
 
-> 🚧 **Early Development**
+**Stage 7 — publishing.** Five packages at `0.1.0`, verified from tarballs
+into a consumer outside the repo. Not yet on npm.
 
-Current milestone:
+Earlier stages are recorded in `docs/architecture/`, and the tags
+`stage5-complete` and `stage6-complete` mark verified checkpoints, each paired
+with the commit of the dogfooding consumer it was verified against.
 
-**Stage 3** — Interactive Overlay.
+## Packages
 
-**Stage 2 — Complete.** Source Mapping architecture and metadata conventions finalized. See the full report: [`Stage2_Architectural_Validation_Report.pdf`](docs/architecture/Stage2_Architectural_Validation_Report.pdf).
+| package | what it is |
+|---|---|
+| `@click-to-source-3d/shared` | The `SourceRef` contract and protocol constants. Types, no runtime. |
+| `@click-to-source-3d/core` | Provenance resolution and per-instance capture. Browser-pure. |
+| `@click-to-source-3d/overlay` | React Three Fiber components: selection, the trace panel, the bridge. |
+| `@click-to-source-3d/vite-plugin` | Dev-server endpoints, JSX source stamping, the scene bridge. |
+| `@click-to-source-3d/mcp` | An MCP server exposing the same provenance to coding agents. |
 
-**Stage 1 — Complete.** All 7 experiments were executed, validating provenance tracking across mount, re-render, recreation, HMR, and memoized generation scenarios. See the full report: [`Stage1_Experimental_Report.pdf`](docs/research/Stage1_Experimental_Report.pdf).
+## Scope — React Three Fiber only
 
-Architecture documents, research, and technical approach documents are available in the `docs/` folder.
+Source stamping is a JSX transform, the overlay is React, the bridge component
+needs the R3F tree, and the dev-server half needs Vite. Plain Three.js can use
+`@click-to-source-3d/core` with hand-written `userData.sourceRef`, but the
+experience this project is about is R3F.
+
+## What it costs to adopt
+
+Two installs bring four packages — `core` and `shared` arrive as dependencies:
+
+```bash
+npm install @click-to-source-3d/overlay
+npm install -D @click-to-source-3d/vite-plugin
+```
+
+Then roughly five things go into your app:
+
+1. `clickToSource()` in `vite.config.js`, **before** `react()`
+2. `useClickToSource()` in a pointer handler, feeding the selection store
+3. `<SelectionHighlight />` inside the `Canvas`
+4. `<GenerationTrace />` outside the `Canvas` — it renders DOM
+5. `<ClickToSourceBridge />` inside the `Canvas`, if you want the agent tools
+
+Every feature is opt-in and dev-only. Add `@click-to-source-3d/mcp` for the
+MCP server.
+
+## Limits worth knowing before you adopt it
+
+**Instanced provenance is read-only.** An instance's transform comes from
+whatever placed it, usually a seeded RNG, so there is no literal in your source
+to rewrite. The panel shows the values and refuses to edit them.
+
+**Variant-class values cannot be recovered.** Automatic capture reads a
+`Matrix4`, so it recovers `x`, `y`, `z`, `scale` and `yaw` — and nothing else.
+Which colour group, species or material variant an instance belongs to is not
+in the transform. Capture recovers *placement*, not *classification*. Those
+values used to exist, in the hand-maintained `instanceSourceRefs` arrays that
+automatic capture replaced; that is a real trade, not an oversight. Keep
+writing them by hand if you need the classification.
+
+**Selection highlighting is mesh-wide for instanced meshes.** Clicking one
+instance outlines every instance in that `InstancedMesh`. Resolution is
+per-instance and correct; only the outline is coarse.
+
+**Scene addresses do not detect regeneration.** They are derived from source
+location, so they survive a remount — but if your world rebuilds with different
+placements, the same address resolves to a different object and nothing reports
+that it changed.
 
 ## Roadmap
 
-| Stage | Milestone | Description |
-|-------|-----------|-------------|
-| 0 | Scope Freeze | Finalize core goals, non-goals, and project constraints |
-| 1 | Prove the Mechanism | Validate DOM-to-Source patterns and identify metadata injection techniques |
-| 2 | Provenance/Source Mapping Convention | Define canonical data structures and architectural boundaries |
-| 3 | Core Engine + Overlay MVP | Build the metadata pipeline and a basic UI for on-screen selection |
-| 4 | Dogfooding | Integrate into a complex test project to validate developer experience |
-| 5 | Package Polish | Finalize APIs, add tests, write docs, and prepare for external use |
-| 6 | MCP/AI Mode | Build standard MCP context interfaces for AI agents |
-| 6.5 | Optional Auto-Instrumentation | Research AST/Babel transformations to remove manual tagging |
-| 7 | Ship | Version 1.0 release |
+| Stage | Milestone | Status |
+|-------|-----------|--------|
+| 0 | Scope freeze | done |
+| 1 | Prove the mechanism | done |
+| 2 | Provenance convention | done |
+| 3 | Core engine + overlay | done |
+| 4 | Dogfooding | done |
+| 5 | Package polish | done — `stage5-complete` |
+| 6 | MCP / agent mode | done — `stage6-complete` |
+| 6.5 | Auto-instrumentation | done — shipped as `stampSource`, no longer optional or research |
+| 7 | Ship | in progress — first release is `0.1.0`, not 1.0 |
 
-For the full roadmap, see [`docs/roadmap/`](docs/roadmap/).
+The 1.0 in the original plan was optimistic. This releases at `0.1.0`: the API
+surface has only just been curated deliberately, instanced provenance is
+read-only, and there is no staleness detection for scene addresses. `0.x` says
+that honestly.
+
+For the original plan, see [`docs/roadmap/`](docs/roadmap/).
 
 ## Overlay components and the render loop
 
@@ -98,10 +158,12 @@ click-to-source/
 │   └── assets/                  # Documentation assets (diagrams, images)
 │
 ├── packages/                    # Monorepo packages (npm workspaces)
-│   ├── core/                    # Core provenance engine
-│   ├── overlay/                 # Interactive inspection overlay
-│   ├── examples/                # Example projects and demos
-│   └── shared/                  # Shared utilities and types
+│   ├── shared/                  # SourceRef contract and protocol constants
+│   ├── core/                    # Provenance resolution, instance capture
+│   ├── overlay/                 # React Three Fiber inspection components
+│   ├── vite-plugin/             # Dev-server endpoints, stamping, bridge
+│   ├── mcp/                     # MCP server for coding agents
+│   └── examples/                # Example projects and demos
 │
 ├── scripts/                     # Build, release, and development scripts
 │
