@@ -6,8 +6,8 @@
  * symbol these modules happen to expose — including ones that exist only so
  * a sibling module or a test can reach them.
  *
- * Internals that need to be reachable live at `@click-to-source-3d/core/internal`
- * and carry no stability guarantee.
+ * Supplying your own bridge transport instead of the one the Vite plugin
+ * serves is the `@click-to-source-3d/core/bridge` subpath.
  */
 export { resolveSourceRef, resolveObjectAtPoint } from "./resolver.js";
 export type { ResolutionResult } from "./resolver.js";

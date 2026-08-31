@@ -57,9 +57,14 @@ confident wrong provenance is worse than none.
 
 ## Subpaths
 
-    @click-to-source-3d/core           the public API
-    @click-to-source-3d/core/probe     installs the instance capture probe
-    @click-to-source-3d/core/internal  reachable internals, no stability guarantee
+    @click-to-source-3d/core         the public API
+    @click-to-source-3d/core/probe   installs the instance capture probe
+    @click-to-source-3d/core/bridge  answer bridge queries over your own transport
+
+The `bridge` subpath is only needed if the SSE channel the Vite plugin serves
+does not fit your setup. Attach a scene with `setBridgeScene()`, then pass each
+incoming query to `answerBridgeQuery` — the same function the built-in channel
+calls, so a custom transport answers identically.
 
 ## License
 

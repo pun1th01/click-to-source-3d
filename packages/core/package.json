@@ -13,9 +13,9 @@
       "types": "./dist/probe.d.ts",
       "default": "./dist/probe.js"
     },
-    "./internal": {
-      "types": "./dist/internal.d.ts",
-      "default": "./dist/internal.js"
+    "./bridge": {
+      "types": "./dist/bridge.d.ts",
+      "default": "./dist/bridge.js"
     },
     "./package.json": "./package.json"
   },
