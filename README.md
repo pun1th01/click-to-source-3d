@@ -22,8 +22,12 @@ Unlike DOM-focused click-to-source tools or general Three.js scene inspectors, t
 
 ## Current Status
 
-**Stage 7 — publishing.** Five packages at `0.1.0`, verified from tarballs
-into a consumer outside the repo. Not yet on npm.
+**Stage 7 — release.** Five packages at `0.1.0`, versioned in lockstep and
+verified by installing all five into a consumer outside this repository.
+
+`0.1.0` is deliberate rather than modest: instanced provenance is read-only,
+scene addresses cannot detect a world regeneration, and the public API surface
+was curated for the first time immediately before release.
 
 Earlier stages are recorded in `docs/architecture/`, and the tags
 `stage5-complete` and `stage6-complete` mark verified checkpoints, each paired
@@ -48,23 +52,155 @@ experience this project is about is R3F.
 
 ## What it costs to adopt
 
-Two installs bring four packages — `core` and `shared` arrive as dependencies:
+Two installs bring four packages, and roughly five things go into your app: the
+plugin, a pointer handler, two components inside the `Canvas` and one outside
+it. Every feature is opt-in and dev-only. The next section is the working code.
+
+## Getting Started
+
+### 1. Install
 
 ```bash
 npm install @click-to-source-3d/overlay
 npm install -D @click-to-source-3d/vite-plugin
 ```
 
-Then roughly five things go into your app:
+`core` and `shared` arrive as dependencies. Add `@click-to-source-3d/mcp` if
+you want the agent tools.
 
-1. `clickToSource()` in `vite.config.js`, **before** `react()`
-2. `useClickToSource()` in a pointer handler, feeding the selection store
-3. `<SelectionHighlight />` inside the `Canvas`
-4. `<GenerationTrace />` outside the `Canvas` — it renders DOM
-5. `<ClickToSourceBridge />` inside the `Canvas`, if you want the agent tools
+### 2. `vite.config.js`
 
-Every feature is opt-in and dev-only. Add `@click-to-source-3d/mcp` for the
-MCP server.
+```js
+import { defineConfig } from 'vite';
+import react from '@vitejs/plugin-react';
+import { clickToSource } from '@click-to-source-3d/vite-plugin';
+
+export default defineConfig({
+  // clickToSource() MUST come before react().
+  plugins: [
+    clickToSource({
+      stampSource: true,      // stamp file/function/line into userData
+      captureInstances: true, // per-instance transforms for InstancedMesh
+      bridge: true,           // let an agent query the running scene
+    }),
+    react(),
+  ],
+});
+```
+
+**The order matters and fails silently if you get it wrong.** Both plugins
+declare `enforce: "pre"`, so Vite preserves array order between them. Put
+`react()` first and it compiles the JSX away before stamping runs — there are
+no JSX elements left to stamp. Nothing errors and nothing warns; you simply get
+objects with no provenance, which looks like the tool not working.
+
+### 3. The JSX
+
+Two components go inside the `Canvas`, one goes outside it, and a `<group>`
+carries the pointer handler.
+
+```jsx
+import { Canvas } from '@react-three/fiber';
+import {
+  useClickToSource,
+  useOverlayStore,
+  SelectionHighlight,
+  GenerationTrace,
+  ClickToSourceBridge,
+} from '@click-to-source-3d/overlay';
+
+function Scene() {
+  const resolveClick = useClickToSource();
+
+  const handlePointerUp = (e) => {
+    e.stopPropagation();
+    const resolved = resolveClick(e);
+    if (resolved) {
+      useOverlayStore.getState().select(resolved);
+    } else {
+      useOverlayStore.getState().clearSelection();
+    }
+  };
+
+  return (
+    <>
+      <SelectionHighlight />
+      <group onPointerUp={handlePointerUp}>
+        {/* your scene */}
+      </group>
+    </>
+  );
+}
+
+export default function App() {
+  const handlePointerMissed = () => {
+    useOverlayStore.getState().clearSelection();
+  };
+
+  return (
+    <>
+      <Canvas onPointerMissed={handlePointerMissed}>
+        <ClickToSourceBridge />
+        <Scene />
+      </Canvas>
+
+      {/* Outside the Canvas: GenerationTrace renders DOM, not scene objects */}
+      <GenerationTrace />
+    </>
+  );
+}
+```
+
+`onPointerMissed` on the `Canvas` is what clears the selection when you click
+empty space.
+
+### 4. `InstancedMesh` needs its bounding volumes recomputed
+
+Raycasts test an instanced mesh's bounding volume before its instances. A mesh
+constructed before its matrices are written has a bounding volume that does not
+cover them, so clicks miss and the mesh appears to have no provenance at all.
+
+After the placement loop, mark the matrices dirty and recompute:
+
+```jsx
+function InstancedTreeMesh({ geometry, material, matrices }) {
+  const meshRef = useRef();
+
+  useEffect(() => {
+    if (!meshRef.current || !matrices?.length) return;
+    matrices.forEach((m, i) => meshRef.current.setMatrixAt(i, m));
+    meshRef.current.instanceMatrix.needsUpdate = true;
+    meshRef.current.computeBoundingBox();
+    meshRef.current.computeBoundingSphere();
+  }, [matrices]);
+
+  if (!matrices?.length) return null;
+
+  return (
+    <instancedMesh
+      ref={meshRef}
+      args={[geometry, material, matrices.length]}
+      frustumCulled={false}
+    />
+  );
+}
+```
+
+This is also the write the capture probe observes, so the same `setMatrixAt`
+loop that places your instances is what gives them per-instance provenance.
+
+### 5. If you use `frameloop="demand"`
+
+`<SelectionHighlight />` draws through the render loop at `useFrame` priority 1,
+which makes R3F hand rendering over to it. Under `frameloop="demand"` it
+requests a frame whenever the selection changes, so it works.
+
+Under `frameloop="never"` it cannot — your application drives frames, so call
+`advance()` after changing the selection. It warns once in development rather
+than failing silently.
+
+It also will not compose with other post-processing that claims a `useFrame`
+priority: whichever renders last wins and the other's output is discarded.
 
 ## Limits worth knowing before you adopt it
 
@@ -110,40 +246,17 @@ that honestly.
 
 For the original plan, see [`docs/roadmap/`](docs/roadmap/).
 
-## Overlay components and the render loop
+## `<ClickToSourceBridge />` and background tabs
 
-Two components have requirements that are invisible from their call sites,
-because when either is unmet the result is a component that renders nothing
-and says nothing. Both were found by consumers rather than by tests.
-
-### `<SelectionHighlight />`
-
-Draws the selection outline through an `EffectComposer`, on a `useFrame`
-subscription at **priority 1**. Any priority above zero makes R3F stop
-rendering the scene itself and hand the job to the subscriber, so this
-component becomes the renderer.
-
-- It does **not** compose with other post-processing that also claims a
-  priority. Whichever renders last wins and the other's output is discarded.
-- Under `frameloop="demand"` it works: it calls `invalidate()` whenever the
-  selection changes. Before that it silently did not, because the selection
-  arrives from a store R3F does not observe, so no frame was ever scheduled.
-- Under `frameloop="never"` it cannot work — your application drives frames,
-  so call `advance()` after changing the selection. It warns once in
-  development rather than failing silently.
-
-There is no requirement on the `gl` prop. A bare `<Canvas>` is fine.
-
-### `<ClickToSourceBridge />`
-
-Answers queries about the running scene, and must be inside the `Canvas`,
-since only a component in the R3F tree can supply a scene and a camera.
+The bridge answers queries about the running scene, and must be inside the
+`Canvas`, since only a component in the R3F tree can supply a scene and a
+camera.
 
 It answers only while the page is actually rendering. R3F does not render
-`Canvas` children in a hidden or background tab, so the component never
-mounts and every bridge query reports `disconnected` — indistinguishable
-from no page being open. This matters when driving the app headlessly: keep
-the page visible, or expect `disconnected`.
+`Canvas` children in a hidden or background tab, so the component never mounts
+and every bridge query reports `disconnected` — indistinguishable from no page
+being open. This matters when driving the app headlessly: keep the page
+visible, or expect `disconnected`.
 
 ## Repository Structure
 
