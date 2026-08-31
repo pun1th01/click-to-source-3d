@@ -1,4 +1,4 @@
-# @click-to-source/vite-plugin
+# @click-to-source-3d/vite-plugin
 
 The dev-server half of [Click-to-Source 3D](https://github.com/pun1th01/click-to-source-3d):
 source read/write endpoints, build-time JSX source stamping, and the scene
@@ -10,16 +10,16 @@ Dev only. Every feature is off by default.
 
 **Vite, and React Three Fiber.** Source stamping is a JSX transform, so it
 applies to `.jsx`/`.tsx`. The endpoints it serves are consumed by
-[`@click-to-source/overlay`](https://www.npmjs.com/package/@click-to-source/overlay)
-and [`@click-to-source/mcp`](https://www.npmjs.com/package/@click-to-source/mcp).
+[`@click-to-source-3d/overlay`](https://www.npmjs.com/package/@click-to-source-3d/overlay)
+and [`@click-to-source-3d/mcp`](https://www.npmjs.com/package/@click-to-source-3d/mcp).
 
 ## Install
 
-    npm install -D @click-to-source/vite-plugin
+    npm install -D @click-to-source-3d/vite-plugin
 
 ## Use
 
-    import { clickToSource } from "@click-to-source/vite-plugin";
+    import { clickToSource } from "@click-to-source-3d/vite-plugin";
     import react from "@vitejs/plugin-react";
 
     export default defineConfig({

@@ -1,6 +1,6 @@
 import { useEffect } from "react";
 import { useThree } from "@react-three/fiber";
-import { connectBridge, setBridgeScene } from "@click-to-source/core";
+import { connectBridge, setBridgeScene } from "@click-to-source-3d/core";
 
 /**
  * Connects the running scene to the bridge, so an out-of-process client can

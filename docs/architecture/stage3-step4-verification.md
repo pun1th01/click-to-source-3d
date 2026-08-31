@@ -63,7 +63,7 @@ The component returns `null` — it is a non-visual R3F component that only part
 
 ### OrbitControls (Examples Demo Only)
 
-OrbitControls were added to the examples demo ([`main.tsx`](file:///c:/Users/sarma/OneDrive/Desktop/My%20FIles/My%20Project/click-to-source/packages/examples/src/main.tsx)) to enable camera movement testing. This is strictly a demo testing aid and is not part of `@click-to-source/core` or `@click-to-source/overlay`.
+OrbitControls were added to the examples demo ([`main.tsx`](file:///c:/Users/sarma/OneDrive/Desktop/My%20FIles/My%20Project/click-to-source/packages/examples/src/main.tsx)) to enable camera movement testing. This is strictly a demo testing aid and is not part of `@click-to-source-3d/core` or `@click-to-source-3d/overlay`.
 
 Implementation:
 
@@ -161,10 +161,10 @@ This is standard OutlinePass behavior and is **not** considered a correctness bu
 
 | File | Package | Change |
 |------|---------|--------|
-| `packages/examples/src/main.tsx` | `@click-to-source/examples` | Added `SceneOrbitControls` component for camera movement testing |
-| `packages/overlay/dist/*` | `@click-to-source/overlay` | Regenerated from source via `tsc -b` (no source changes) |
+| `packages/examples/src/main.tsx` | `@click-to-source-3d/examples` | Added `SceneOrbitControls` component for camera movement testing |
+| `packages/overlay/dist/*` | `@click-to-source-3d/overlay` | Regenerated from source via `tsc -b` (no source changes) |
 
-No source files were modified in `@click-to-source/core`, `@click-to-source/overlay`, or `@click-to-source/shared`.
+No source files were modified in `@click-to-source-3d/core`, `@click-to-source-3d/overlay`, or `@click-to-source-3d/shared`.
 
 ---
 

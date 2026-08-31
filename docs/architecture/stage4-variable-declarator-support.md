@@ -8,7 +8,7 @@ During Stage 4 dogfooding in the Procedural Low-Poly World Generator, it was dis
 The Stage 3 implementation of `sourceEditor` relied on an AST visitor that strictly targeted `JSXAttribute` and `ObjectProperty` nodes. As a result, hoisted variables were ignored entirely, returning an `ARGUMENT_NOT_FOUND` error.
 
 ## Resolution
-The `collectCandidates` visitor in `@click-to-source/core/src/sourceEditor.ts` has been extended to natively support `VariableDeclarator` nodes.
+The `collectCandidates` visitor in `@click-to-source-3d/core/src/sourceEditor.ts` has been extended to natively support `VariableDeclarator` nodes.
 
 **Supported Shapes:**
 - `JSXAttribute` (`<mesh scale={0.5} />`)

@@ -35,8 +35,8 @@ export type InstanceSourceRef = {
  * The dev-server endpoints backing the source-edit round trip.
  *
  * Both halves of the contract import these: the browser client in
- * `@click-to-source/overlay` and the dev-server plugin in
- * `@click-to-source/vite-plugin`. A single definition is what keeps the two
+ * `@click-to-source-3d/overlay` and the dev-server plugin in
+ * `@click-to-source-3d/vite-plugin`. A single definition is what keeps the two
  * sides from drifting apart silently — a mismatch leaves the panel able to
  * resolve provenance but unable to write anything back, with no error to
  * point at.
@@ -76,7 +76,7 @@ export type SourceEditErrorCode =
 
 /**
  * Location stamped onto `userData.__ctsSource` by the build-time transform in
- * `@click-to-source/vite-plugin`.
+ * `@click-to-source-3d/vite-plugin`.
  *
  * Carries only what a JSX element's own position can tell you. `args` is
  * absent by design: the transform knows where a call site is, not which of
@@ -102,7 +102,7 @@ export type PartialSourceRef = Partial<SourceRef>;
  *
  * Three channels rather than a WebSocket. A socket would be the obvious
  * choice for request/response, but the only usable server implementation
- * would be a new dependency in `@click-to-source/vite-plugin`, which
+ * would be a new dependency in `@click-to-source-3d/vite-plugin`, which
  * otherwise carries three. The lifecycle that matters here — close observed
  * before reconnect on a full reload — was measured on this transport and is
  * the same either way.

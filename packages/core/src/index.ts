@@ -1,12 +1,12 @@
 /**
- * The public API of @click-to-source/core.
+ * The public API of @click-to-source-3d/core.
  *
  * Named explicitly rather than re-exported wholesale. Publishing turns
  * whatever appears here into a contract, and `export *` would promise every
  * symbol these modules happen to expose — including ones that exist only so
  * a sibling module or a test can reach them.
  *
- * Internals that need to be reachable live at `@click-to-source/core/internal`
+ * Internals that need to be reachable live at `@click-to-source-3d/core/internal`
  * and carry no stability guarantee.
  */
 export { resolveSourceRef, resolveObjectAtPoint } from "./resolver.js";

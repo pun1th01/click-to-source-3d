@@ -1,6 +1,6 @@
 import { parse } from "@babel/parser";
 import MagicString from "magic-string";
-import type { EditRequest, SourceEditErrorCode } from "@click-to-source/shared";
+import type { EditRequest, SourceEditErrorCode } from "@click-to-source-3d/shared";
 
 export class SourceEditError extends Error {
   readonly code: SourceEditErrorCode;

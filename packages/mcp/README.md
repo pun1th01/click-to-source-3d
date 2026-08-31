@@ -1,4 +1,4 @@
-# @click-to-source/mcp
+# @click-to-source-3d/mcp
 
 An MCP server that gives a coding agent your scene's provenance — both what the
 source declares and what the running app actually built.
@@ -9,13 +9,13 @@ Part of [Click-to-Source 3D](https://github.com/pun1th01/click-to-source-3d).
 
 **React Three Fiber, behind a Vite dev server.** The file tools read your
 project through
-[`@click-to-source/vite-plugin`](https://www.npmjs.com/package/@click-to-source/vite-plugin);
+[`@click-to-source-3d/vite-plugin`](https://www.npmjs.com/package/@click-to-source-3d/vite-plugin);
 the scene tools need the app open in a browser with `bridge: true` and
 `<ClickToSourceBridge />` mounted.
 
 ## Install
 
-    npm install -D @click-to-source/mcp
+    npm install -D @click-to-source-3d/mcp
 
 Register the binary with your MCP client:
 

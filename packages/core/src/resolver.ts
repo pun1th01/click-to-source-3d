@@ -3,7 +3,7 @@ import {
   SourceRef,
   InstanceSourceRef,
   SourceStamp,
-} from "@click-to-source/shared";
+} from "@click-to-source-3d/shared";
 import {
   getInstanceRecord,
   instanceSourceRefFrom,

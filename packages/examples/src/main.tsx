@@ -1,9 +1,9 @@
 import React, { useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { Canvas, ThreeEvent, useFrame, useThree } from "@react-three/fiber";
-import { useClickToSource, useOverlayStore, SelectionHighlight, GenerationTrace } from "@click-to-source/overlay";
-import { ResolutionResult } from "@click-to-source/core";
-import { SourceRef } from "@click-to-source/shared";
+import { useClickToSource, useOverlayStore, SelectionHighlight, GenerationTrace } from "@click-to-source-3d/overlay";
+import { ResolutionResult } from "@click-to-source-3d/core";
+import { SourceRef } from "@click-to-source-3d/shared";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 
 /**

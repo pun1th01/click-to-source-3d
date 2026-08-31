@@ -10,7 +10,7 @@ This step strictly provides a presentation layer over the already-existing stabl
 
 ## Implementation
 
-The UI is implemented as a React component, `GenerationTrace`, in the `@click-to-source/overlay` package. 
+The UI is implemented as a React component, `GenerationTrace`, in the `@click-to-source-3d/overlay` package. 
 
 ### Data Flow
 

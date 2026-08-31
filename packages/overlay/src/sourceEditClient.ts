@@ -3,7 +3,7 @@ import {
   WRITE_FILE_PATH,
   type EditRequest,
   type SourceRef,
-} from "@click-to-source/shared";
+} from "@click-to-source-3d/shared";
 
 type JsonResponse = {
   ok: boolean;

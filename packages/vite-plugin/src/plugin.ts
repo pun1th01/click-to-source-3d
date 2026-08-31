@@ -4,8 +4,8 @@ import {
   BRIDGE_REPLY_PATH,
   READ_FILE_PATH,
   WRITE_FILE_PATH,
-} from "@click-to-source/shared";
-import type { BridgeQuery } from "@click-to-source/shared";
+} from "@click-to-source-3d/shared";
+import type { BridgeQuery } from "@click-to-source-3d/shared";
 import { BridgeHub } from "./bridgeHub.js";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { Plugin, ResolvedConfig } from "vite";
@@ -209,7 +209,7 @@ export function clickToSource(options: ClickToSourceOptions = {}): Plugin {
 
     load(id) {
       return id === `\0${PROBE_MODULE_ID}`
-        ? 'import "@click-to-source/core/probe";'
+        ? 'import "@click-to-source-3d/core/probe";'
         : null;
     },
 

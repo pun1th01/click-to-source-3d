@@ -62,7 +62,7 @@ Using the existing `editSource()` API against the actual `packages/examples/src/
 - Step 6 Vite file-I/O tests: 3 passed.
 - Overlay tests: 4 passed.
 - TypeScript build: passed with `npx tsc -b packages/shared packages/core packages/overlay`.
-- Examples Vite build: passed with `npm run build --workspace=@click-to-source/examples`.
+- Examples Vite build: passed with `npm run build --workspace=@click-to-source-3d/examples`.
 - `git diff --check`: passed.
 
 The Vite build still reports its existing non-blocking config-loader and large-chunk warnings.

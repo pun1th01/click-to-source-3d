@@ -2,7 +2,7 @@ import {
   BRIDGE_QUERY_PATH,
   type BridgeQuery,
   type ProvenanceAddress,
-} from "@click-to-source/shared";
+} from "@click-to-source-3d/shared";
 import { postJson, type DevServerOptions } from "./devServer.js";
 
 /**

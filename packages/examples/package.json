@@ -1,5 +1,5 @@
 {
-  "name": "@click-to-source/examples",
+  "name": "@click-to-source-3d/examples",
   "version": "0.0.0",
   "private": true,
   "description": "Example projects and demos for Click-to-Source 3D",
@@ -9,10 +9,10 @@
     "build": "vite build"
   },
   "dependencies": {
-    "@click-to-source/core": "*",
-    "@click-to-source/overlay": "*",
-    "@click-to-source/shared": "*",
-    "@click-to-source/vite-plugin": "0.1.0",
+    "@click-to-source-3d/core": "*",
+    "@click-to-source-3d/overlay": "*",
+    "@click-to-source-3d/shared": "*",
+    "@click-to-source-3d/vite-plugin": "0.1.0",
     "@react-three/fiber": "^9.7.0",
     "@vitejs/plugin-react": "^6.0.5",
     "react": "^19.2.8",

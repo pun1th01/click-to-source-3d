@@ -1,4 +1,4 @@
-# @click-to-source/overlay
+# @click-to-source-3d/overlay
 
 React Three Fiber components for inspecting a running scene: click a mesh, see
 the source location and the arguments that produced it, edit those arguments in
@@ -10,18 +10,18 @@ Part of [Click-to-Source 3D](https://github.com/pun1th01/click-to-source-3d).
 
 **React Three Fiber only.** The overlay is React, `<SelectionHighlight />` and
 `<ClickToSourceBridge />` need the R3F tree, and automatic source stamping is a
-JSX transform. Plain Three.js can use `@click-to-source/core` directly with
+JSX transform. Plain Three.js can use `@click-to-source-3d/core` directly with
 hand-written `userData.sourceRef`, but the experience described here is R3F.
 
 Vite is required for the dev-server half — see
-[`@click-to-source/vite-plugin`](https://www.npmjs.com/package/@click-to-source/vite-plugin).
+[`@click-to-source-3d/vite-plugin`](https://www.npmjs.com/package/@click-to-source-3d/vite-plugin).
 
 ## Install
 
 Two installs bring four packages; `core` and `shared` arrive as dependencies.
 
-    npm install @click-to-source/overlay
-    npm install -D @click-to-source/vite-plugin
+    npm install @click-to-source-3d/overlay
+    npm install -D @click-to-source-3d/vite-plugin
 
 ## Wiring
 
@@ -51,7 +51,7 @@ Five things go into your app.
 objects, and shows the file, function, line and editable arguments.
 
 **5. `<ClickToSourceBridge />`** — inside the `Canvas`, only if you want the
-agent tools in [`@click-to-source/mcp`](https://www.npmjs.com/package/@click-to-source/mcp)
+agent tools in [`@click-to-source-3d/mcp`](https://www.npmjs.com/package/@click-to-source-3d/mcp)
 to query the live scene.
 
 ## Limits worth knowing before you adopt it

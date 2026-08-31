@@ -119,13 +119,13 @@ passed
 npx tsc -b packages/shared packages/core packages/overlay
 passed
 
-npm run test --workspace=@click-to-source/core
+npm run test --workspace=@click-to-source-3d/core
 6 tests passed
 
-npm run test --workspace=@click-to-source/overlay
+npm run test --workspace=@click-to-source-3d/overlay
 4 tests passed
 
-npm run build --workspace=@click-to-source/examples
+npm run build --workspace=@click-to-source-3d/examples
 passed - Vite 8.2.1
 ```
 

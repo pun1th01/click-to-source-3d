@@ -1,6 +1,6 @@
 # Stage 5 Addendum: InstancedMesh Per-Instance Provenance
 
-This document serves as an addendum to `metadata-convention.pdf` and the `Stage 3 Implementation Validation Report`. It is the reference cited by the `@see` comment on `InstanceSourceRef` in `@click-to-source/shared`.
+This document serves as an addendum to `metadata-convention.pdf` and the `Stage 3 Implementation Validation Report`. It is the reference cited by the `@see` comment on `InstanceSourceRef` in `@click-to-source-3d/shared`.
 
 ## Finding
 
@@ -10,7 +10,7 @@ The generating call site for an instance is also not a fixed literal. Each insta
 
 ## Resolution — Phase 1: Per-Instance Lookup
 
-**Shape.** `InstanceSourceRef` in `@click-to-source/shared` wraps a standard `SourceRef`:
+**Shape.** `InstanceSourceRef` in `@click-to-source-3d/shared` wraps a standard `SourceRef`:
 
     export type InstanceSourceRef = {
       sourceRef: SourceRef;
@@ -18,7 +18,7 @@ The generating call site for an instance is also not a fixed literal. Each insta
 
 Generators store an array of these on the mesh as `userData.instanceSourceRefs`, indexed 1:1 by Three.js `instanceId`. The wrapper exists so per-instance entries can later carry fields a plain `SourceRef` should not have, without widening `SourceRef` itself.
 
-**Lookup.** `resolveInstanceSourceRef` in `@click-to-source/core/src/resolver.ts` is module-private and reached only through `resolveSourceRef(object, instanceId)`. It returns `null` — never throws — when:
+**Lookup.** `resolveInstanceSourceRef` in `@click-to-source-3d/core/src/resolver.ts` is module-private and reached only through `resolveSourceRef(object, instanceId)`. It returns `null` — never throws — when:
 
 1. `instanceId` is `undefined` or `null`.
 2. `userData.instanceSourceRefs` is absent or not an array.

@@ -24,7 +24,7 @@ document order, so the probe is live before any scene mounts as a matter of
 document structure rather than of the consumer remembering something.
 
 The script points at a virtual module the plugin serves, whose body is a plain
-`import "@click-to-source/core/probe"`. Two simpler routes were tried and do
+`import "@click-to-source-3d/core/probe"`. Two simpler routes were tried and do
 not work. A bare specifier is not resolvable from an HTML `src`. Prepending the
 import to the entry module depends on the HTML being requested before the entry
 is transformed, which module caching makes unreliable. The virtual module lets
@@ -34,7 +34,7 @@ copy of three than the application uses, and would then observe nothing.
 
 The probe can also be installed by hand as the first statement of an entry:
 
-    import "@click-to-source/core/probe";
+    import "@click-to-source-3d/core/probe";
 
 ## Per-instance precedence
 

@@ -1,4 +1,4 @@
-# @click-to-source/core
+# @click-to-source-3d/core
 
 Provenance resolution for Three.js objects: given a rendered object, find the
 source location and arguments that produced it.
@@ -7,25 +7,25 @@ Browser-pure, no framework dependency. Part of
 [Click-to-Source 3D](https://github.com/pun1th01/click-to-source-3d).
 
 Most users do not install this directly — it arrives with
-[`@click-to-source/overlay`](https://www.npmjs.com/package/@click-to-source/overlay).
+[`@click-to-source-3d/overlay`](https://www.npmjs.com/package/@click-to-source-3d/overlay).
 Install it alone if you are on plain Three.js, or building your own UI.
 
 ## Install
 
-    npm install @click-to-source/core
+    npm install @click-to-source-3d/core
 
 `three` is a peer dependency (`>=0.170.0 <0.180.0`).
 
 ## Use
 
-    import { resolveSourceRef } from "@click-to-source/core";
+    import { resolveSourceRef } from "@click-to-source-3d/core";
 
     const resolved = resolveSourceRef(object, instanceId);
     // -> { object, sourceRef: { file, function, line, args }, readonly }
 
 Provenance comes from either source: `userData.sourceRef`, written by hand, or
 `userData.__ctsSource`, stamped automatically by
-[`@click-to-source/vite-plugin`](https://www.npmjs.com/package/@click-to-source/vite-plugin).
+[`@click-to-source-3d/vite-plugin`](https://www.npmjs.com/package/@click-to-source-3d/vite-plugin).
 A manual ref wins over a stamp, field by field, so you can correct one value
 without giving up automatic location.
 
@@ -34,7 +34,7 @@ without giving up automatic location.
 `InstancedMesh` instances have no objects of their own. Install the probe
 before any scene mounts and it records each write:
 
-    import "@click-to-source/core/probe";
+    import "@click-to-source-3d/core/probe";
 
 The Vite plugin injects this for you under `captureInstances: true`, ahead of
 your entry module, because a probe that arrives after the first scene commits
@@ -57,9 +57,9 @@ confident wrong provenance is worse than none.
 
 ## Subpaths
 
-    @click-to-source/core           the public API
-    @click-to-source/core/probe     installs the instance capture probe
-    @click-to-source/core/internal  reachable internals, no stability guarantee
+    @click-to-source-3d/core           the public API
+    @click-to-source-3d/core/probe     installs the instance capture probe
+    @click-to-source-3d/core/internal  reachable internals, no stability guarantee
 
 ## License
 

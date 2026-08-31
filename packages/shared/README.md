@@ -1,4 +1,4 @@
-# @click-to-source/shared
+# @click-to-source-3d/shared
 
 Type definitions and protocol constants shared across
 [Click-to-Source 3D](https://github.com/pun1th01/click-to-source-3d).

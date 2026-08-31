@@ -1,7 +1,7 @@
 import { create } from "zustand";
 import type * as THREE from "three";
-import type { ResolutionResult } from "@click-to-source/core";
-import type { SourceRef } from "@click-to-source/shared";
+import type { ResolutionResult } from "@click-to-source-3d/core";
+import type { SourceRef } from "@click-to-source-3d/shared";
 
 export type OverlayState = {
   selectedObject: THREE.Object3D | null;

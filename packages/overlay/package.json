@@ -1,5 +1,5 @@
 {
-  "name": "@click-to-source/overlay",
+  "name": "@click-to-source-3d/overlay",
   "version": "0.1.0",
   "description": "Interactive inspection overlay for Click-to-Source 3D",
   "license": "MIT",
@@ -28,8 +28,8 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@click-to-source/core": "0.1.0",
-    "@click-to-source/shared": "0.1.0",
+    "@click-to-source-3d/core": "0.1.0",
+    "@click-to-source-3d/shared": "0.1.0",
     "zustand": "^5.0.14"
   },
   "peerDependencies": {

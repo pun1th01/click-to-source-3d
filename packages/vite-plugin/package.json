@@ -1,5 +1,5 @@
 {
-  "name": "@click-to-source/vite-plugin",
+  "name": "@click-to-source-3d/vite-plugin",
   "version": "0.1.0",
   "description": "Vite dev-server plugin providing source read/write endpoints for Click-to-Source 3D",
   "license": "MIT",
@@ -31,7 +31,7 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@click-to-source/shared": "0.1.0",
+    "@click-to-source-3d/shared": "0.1.0",
     "@babel/parser": "^7.29.8",
     "magic-string": "^0.30.21"
   },

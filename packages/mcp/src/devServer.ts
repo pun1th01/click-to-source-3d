@@ -1,4 +1,4 @@
-import { READ_FILE_PATH, WRITE_FILE_PATH } from "@click-to-source/shared";
+import { READ_FILE_PATH, WRITE_FILE_PATH } from "@click-to-source-3d/shared";
 
 /**
  * Everything here goes through the dev server's endpoints rather than

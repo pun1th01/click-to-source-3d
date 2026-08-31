@@ -1,5 +1,5 @@
 import { ThreeEvent } from "@react-three/fiber";
-import { resolveSourceRef, ResolutionResult } from "@click-to-source/core";
+import { resolveSourceRef, ResolutionResult } from "@click-to-source-3d/core";
 
 /**
  * A thin R3F wrapper that translates pointer events into core provenance resolution.

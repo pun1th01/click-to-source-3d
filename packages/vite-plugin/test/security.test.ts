@@ -2,7 +2,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { createServer, type ViteDevServer } from "vite";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { READ_FILE_PATH, WRITE_FILE_PATH } from "@click-to-source/shared";
+import { READ_FILE_PATH, WRITE_FILE_PATH } from "@click-to-source-3d/shared";
 import { clickToSource } from "../src/plugin.js";
 
 const pluginRoot = path.resolve(

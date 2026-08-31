@@ -5,7 +5,7 @@ import {
   type BridgeQuery,
   type ProvenanceAddress,
   type SourceStamp,
-} from "@click-to-source/shared";
+} from "@click-to-source-3d/shared";
 import {
   getInstanceRecord,
   getProbeStats,
@@ -18,7 +18,7 @@ import { resolveSourceRef } from "./resolver.js";
  * nothing outside the page can answer for itself.
  *
  * Framework-free on purpose: it needs a scene and a camera and nothing else,
- * so the React binding is a thin wrapper in `@click-to-source/overlay` rather
+ * so the React binding is a thin wrapper in `@click-to-source-3d/overlay` rather
  * than a dependency here.
  */
 
@@ -249,7 +249,7 @@ export function answerBridgeQuery(query: BridgeQuery): unknown {
           reason:
             "the instance capture probe is not installed, so no transform was " +
             "ever recorded for any mesh. Pass captureInstances: true to " +
-            "clickToSource(), or import @click-to-source/core/probe as the " +
+            "clickToSource(), or import @click-to-source-3d/core/probe as the " +
             "first statement of the entry module.",
         }
       : instanceId >= mesh.count

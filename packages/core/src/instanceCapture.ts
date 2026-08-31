@@ -1,5 +1,5 @@
 import * as THREE from "three";
-import type { SourceRef } from "@click-to-source/shared";
+import type { SourceRef } from "@click-to-source-3d/shared";
 
 /**
  * One captured instance write: the transform that was live at the moment the

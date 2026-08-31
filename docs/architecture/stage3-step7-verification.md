@@ -13,7 +13,7 @@ resolver, HMR behavior, or automatic instrumentation.
 
 ## Implementation Location
 
-The utility belongs to `@click-to-source/core`, which already contains the
+The utility belongs to `@click-to-source-3d/core`, which already contains the
 non-React provenance logic:
 
 - `packages/core/src/sourceEditor.ts`
@@ -119,7 +119,7 @@ the property on the requested line changes.
 ## Verification Results
 
 ```text
-npm run test --workspace=@click-to-source/core
+npm run test --workspace=@click-to-source-3d/core
 2 test files passed, 14 tests passed
 
 npx tsc -b packages/shared packages/core

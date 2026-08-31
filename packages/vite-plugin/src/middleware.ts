@@ -1,7 +1,7 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import type { IncomingMessage, ServerResponse } from "node:http";
-import type { EditRequest } from "@click-to-source/shared";
+import type { EditRequest } from "@click-to-source-3d/shared";
 import { editSource, SourceEditError } from "./sourceEditor.js";
 
 type ReadFileRequest = {

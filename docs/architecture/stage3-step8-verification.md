@@ -64,7 +64,7 @@ remains `packages/core/src/sourceEditor.ts`.
 - TypeScript build passed:
   `npx tsc -b packages/shared packages/core packages/overlay`.
 - Examples Vite build passed:
-  `npm run build --workspace=@click-to-source/examples`.
+  `npm run build --workspace=@click-to-source-3d/examples`.
 - `git diff --check` passed.
 
 ### Live demo verification

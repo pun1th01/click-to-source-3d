@@ -1,5 +1,5 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
-import type { BridgeQuery } from "@click-to-source/shared";
+import type { BridgeQuery } from "@click-to-source-3d/shared";
 
 /**
  * Server half of the bridge. Holds the open pages and correlates a question
