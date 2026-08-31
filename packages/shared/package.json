@@ -1,5 +1,5 @@
 {
-  "name": "@click-to-source/shared",
+  "name": "@click-to-source-3d/shared",
   "version": "0.1.0",
   "description": "Shared utilities and types for Click-to-Source 3D",
   "license": "MIT",
@@ -22,6 +22,9 @@
   "scripts": {
     "clean": "node -e \"const f=require('fs');f.rmSync('dist',{recursive:true,force:true});f.rmSync('tsconfig.tsbuildinfo',{force:true})\"",
     "build": "tsc -b",
-    "prepack": "npm run clean && tsc -b"
+    "prepack": "npm run clean && tsc -b",
+    "prepublishOnly": "npm run test",
+    "pretest": "tsc -b",
+    "test": "vitest run --passWithNoTests"
   }
 }
