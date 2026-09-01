@@ -364,11 +364,16 @@ export function connectBridge(): () => void {
       };
     }
 
+    // Deliberately not awaited, and deliberately swallowed. The hub applies
+    // its own deadline to every question it asks, so a reply that never
+    // arrives is already handled on that side. What the catch prevents is a
+    // dev server stopped while a tab is still open turning each in-flight
+    // reply into an unhandled rejection in the developer's console.
     void fetch(BRIDGE_REPLY_PATH, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ requestId: envelope.requestId, result }),
-    });
+    }).catch(() => undefined);
   };
 
   const opened = source;

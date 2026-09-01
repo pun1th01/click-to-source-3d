@@ -1,6 +1,6 @@
 {
   "name": "@click-to-source-3d/overlay",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Interactive inspection overlay for Click-to-Source 3D",
   "license": "MIT",
   "type": "module",
@@ -28,15 +28,15 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@click-to-source-3d/core": "0.1.1",
-    "@click-to-source-3d/shared": "0.1.1",
+    "@click-to-source-3d/core": "0.1.2",
+    "@click-to-source-3d/shared": "0.1.2",
     "zustand": "^5.0.14"
   },
   "peerDependencies": {
     "@react-three/fiber": "^9.0.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
-    "three": ">=0.170.0 <0.180.0"
+    "three": ">=0.170.0"
   },
   "devDependencies": {
     "@react-three/fiber": "^9.7.0",

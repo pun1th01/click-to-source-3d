@@ -14,7 +14,7 @@ Install it alone if you are on plain Three.js, or building your own UI.
 
     npm install @click-to-source-3d/core
 
-`three` is a peer dependency (`>=0.170.0 <0.180.0`).
+`three` is a peer dependency (`>=0.170.0`).
 
 ## Use
 

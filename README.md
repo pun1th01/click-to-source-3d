@@ -22,10 +22,10 @@ Unlike DOM-focused click-to-source tools or general Three.js scene inspectors, t
 
 ## Current Status
 
-**Stage 7 — release.** Five packages at `0.1.0`, versioned in lockstep and
+**Stage 7 — release.** Five packages at `0.1.2`, versioned in lockstep and
 verified by installing all five into a consumer outside this repository.
 
-`0.1.0` is deliberate rather than modest: instanced provenance is read-only,
+`0.1.x` is deliberate rather than modest: instanced provenance is read-only,
 scene addresses cannot detect a world regeneration, and the public API surface
 was curated for the first time immediately before release.
 
@@ -52,9 +52,13 @@ experience this project is about is R3F.
 
 ## What it costs to adopt
 
-Two installs bring four packages, and roughly five things go into your app: the
-plugin, a pointer handler, two components inside the `Canvas` and one outside
-it. Every feature is opt-in and dev-only. The next section is the working code.
+Two installs bring four packages, and four things go into your app: the plugin,
+a pointer handler — the only one of the four that is not a component — one
+component inside the `Canvas` and one outside it. The `Canvas` also takes an
+`onPointerMissed` prop, which is what clears the selection on an empty click.
+`<ClickToSourceBridge />` is a fifth, needed only for the agent tools in
+`@click-to-source-3d/mcp`; the example below includes it. Every feature is
+opt-in and dev-only. The next section is the working code.
 
 ## Getting Started
 
@@ -237,9 +241,9 @@ that it changed.
 | 5 | Package polish | done — `stage5-complete` |
 | 6 | MCP / agent mode | done — `stage6-complete` |
 | 6.5 | Auto-instrumentation | done — shipped as `stampSource`, no longer optional or research |
-| 7 | Ship | in progress — first release is `0.1.0`, not 1.0 |
+| 7 | Ship | done — first release was `0.1.0`, not 1.0 |
 
-The 1.0 in the original plan was optimistic. This releases at `0.1.0`: the API
+The 1.0 in the original plan was optimistic. This released at `0.1.0`: the API
 surface has only just been curated deliberately, instanced provenance is
 read-only, and there is no staleness detection for scene addresses. `0.x` says
 that honestly.

@@ -26,16 +26,43 @@ export class SourceEditTransportError extends Error {
   }
 }
 
+/**
+ * A save that never settles is worse here than one that fails.
+ *
+ * Every Save button in the panel is disabled while one is in flight, so a
+ * request that hangs — a dev server stopped mid-edit, a suspended laptop —
+ * leaves the whole panel permanently unable to edit anything, with no error
+ * to explain it. A deadline turns that into a message the developer can act
+ * on. Ten seconds is far longer than a local file read and write needs.
+ */
+const REQUEST_TIMEOUT_MS = 10000;
+
 async function postJson<T>(
   endpoint: string,
   body: unknown,
   fetchImpl: SourceEditFetch
 ): Promise<T> {
-  const response = await fetchImpl(endpoint, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
+  let response: JsonResponse;
+
+  try {
+    response = await fetchImpl(endpoint, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+      // Injected test doubles ignore this, which is why the timeout is not
+      // something they can assert on. It exists for the real fetch.
+      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+    });
+  } catch (error) {
+    if (error instanceof DOMException && error.name === "TimeoutError") {
+      throw new SourceEditTransportError(
+        `No response from the dev server within ${REQUEST_TIMEOUT_MS}ms. Is it still running?`,
+        504
+      );
+    }
+
+    throw error;
+  }
 
   const payload = (await response.json()) as {
     error?: unknown;

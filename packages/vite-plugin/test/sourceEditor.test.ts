@@ -186,6 +186,33 @@ const second = <mesh color="hotpink" />;`;
     );
   });
 
+  it("names the lines an argument does live on when the requested one is wrong", () => {
+    // The shape argSources exists for: a hoisted constant whose only location
+    // is its own declaration, addressed by a sourceRef pointing at the
+    // generator. The edit still fails — this pins the reason being legible.
+    const source = [
+      "const WATER_LEVEL = 3;",
+      "",
+      "function Terrain() {",
+      "  return <mesh />;",
+      "}",
+    ].join("\n");
+
+    expect(() =>
+      editSource(source, {
+        file: "Terrain.jsx",
+        line: 4,
+        argName: "WATER_LEVEL",
+        newValue: 9,
+      })
+    ).toThrowError(
+      expect.objectContaining<Partial<SourceEditError>>({
+        code: "LOCATION_NOT_FOUND",
+        message: expect.stringContaining("declared at line 1"),
+      })
+    );
+  });
+
   it("does not alter the original source when transformation fails", () => {
     const source = `const mesh = <mesh scale={0.35} />;`;
 

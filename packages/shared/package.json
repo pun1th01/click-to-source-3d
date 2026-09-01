@@ -1,6 +1,6 @@
 {
   "name": "@click-to-source-3d/shared",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Shared utilities and types for Click-to-Source 3D",
   "license": "MIT",
   "type": "module",

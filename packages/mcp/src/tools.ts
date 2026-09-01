@@ -7,7 +7,7 @@ import {
 } from "./devServer.js";
 import {
   isSourceFile,
-  scanProvenance,
+  scanFile,
   type ProvenanceSite,
 } from "./scanProvenance.js";
 
@@ -25,10 +25,20 @@ const SCAN_IGNORED = new Set([
   "coverage",
 ]);
 
-async function collectSourceFiles(
+/**
+ * Walks the project and accumulates provenance sites.
+ *
+ * Each file is scanned and released rather than collected first and scanned
+ * afterwards. The budget bounds how many files are read either way; what
+ * changed is that only one file's text is held at a time, instead of up to
+ * two thousand of them at once. Sites are far smaller than the sources they
+ * come from, so peak memory now tracks what was found rather than what was
+ * searched.
+ */
+async function collectSites(
   root: string,
   dir: string,
-  out: Array<{ path: string; text: string }>,
+  out: ProvenanceSite[],
   budget: { remaining: number }
 ): Promise<void> {
   if (budget.remaining <= 0) {
@@ -53,8 +63,27 @@ async function collectSourceFiles(
 
     const full = path.join(dir, entry.name);
 
+    // Symlinks are not followed, in either direction.
+    //
+    // Directories were already excluded by accident rather than by intent:
+    // readdir's Dirent reflects lstat, so isDirectory() is false for a link
+    // to a directory and the recursion below never saw one. Files had no
+    // such accident — a link named `foo.ts` passes isSourceFile and
+    // fs.readFile follows it, so a target outside the project root would be
+    // scanned and reported under an in-root relative path.
+    //
+    // Nothing here reads a file's contents back to the caller; a site
+    // carries a path, a line, a function name and argument names. But this
+    // is the one place in the package that touches the filesystem directly
+    // instead of going through the dev server, which resolves symlinks and
+    // re-checks containment before it answers. Skipping links is what keeps
+    // the two paths saying the same thing about what is in scope.
+    if (entry.isSymbolicLink()) {
+      continue;
+    }
+
     if (entry.isDirectory()) {
-      await collectSourceFiles(root, full, out, budget);
+      await collectSites(root, full, out, budget);
       continue;
     }
     if (!isSourceFile(entry.name)) {
@@ -64,10 +93,11 @@ async function collectSourceFiles(
     budget.remaining--;
 
     try {
-      out.push({
-        path: path.relative(root, full).split(path.sep).join("/"),
-        text: await fs.readFile(full, "utf8"),
-      });
+      const relative = path.relative(root, full).split(path.sep).join("/");
+
+      for (const site of scanFile(relative, await fs.readFile(full, "utf8"))) {
+        out.push(site);
+      }
     } catch {
       // unreadable file, skip
     }
@@ -128,12 +158,10 @@ export async function editParameterTool(
 }
 
 async function loadSites(context: ToolContext): Promise<ProvenanceSite[]> {
-  const files: Array<{ path: string; text: string }> = [];
-  await collectSourceFiles(context.root, context.root, files, {
-    remaining: 2000,
-  });
+  const sites: ProvenanceSite[] = [];
+  await collectSites(context.root, context.root, sites, { remaining: 2000 });
 
-  return scanProvenance(files);
+  return sites;
 }
 
 /**

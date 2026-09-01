@@ -155,7 +155,7 @@ const TOOLS = [
 ];
 
 const server = new Server(
-  { name: "click-to-source", version: "0.1.0" },
+  { name: "click-to-source", version: "0.1.2" },
   { capabilities: { tools: {} } }
 );
 

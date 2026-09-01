@@ -12,7 +12,7 @@
     "@click-to-source-3d/core": "*",
     "@click-to-source-3d/overlay": "*",
     "@click-to-source-3d/shared": "*",
-    "@click-to-source-3d/vite-plugin": "0.1.0",
+    "@click-to-source-3d/vite-plugin": "*",
     "@react-three/fiber": "^9.7.0",
     "@vitejs/plugin-react": "^6.0.5",
     "react": "^19.2.8",

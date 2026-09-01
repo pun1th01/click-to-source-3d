@@ -335,9 +335,28 @@ export function editSource(source: string, request: EditRequest): string {
   );
 
   if (locationMatches.length === 0) {
+    // The argument exists in this file, just not at the line asked for. Saying
+    // where it does live turns a dead end into something the caller can act
+    // on, and it is the difference between the two failures a consumer
+    // actually hits: a stale line, and a name that is not editable at all.
+    //
+    // The panel reaches this constantly and cannot get past it on its own. It
+    // sends `sourceRef.line`, which names the generator's call site, while a
+    // hoisted constant's only location is its own declaration — so the
+    // `waterLevel` -> `WATER_LEVEL` mapping that `argSources` exists to
+    // support lands here every time. Reporting the declaration line does not
+    // make that edit work; it makes the reason legible instead of looking
+    // like the argument does not exist.
+    const found = [
+      ...new Set(candidates.flatMap((candidate) => candidate.locationLines)),
+    ].sort((a, b) => a - b);
+
     throw new SourceEditError(
       "LOCATION_NOT_FOUND",
-      `Argument "${request.argName}" was not found at line ${request.line} in ${request.file}`
+      `Argument "${request.argName}" was not found at line ${request.line} in ` +
+        `${request.file}. It is declared at ${
+          found.length === 1 ? `line ${found[0]}` : `lines ${found.join(", ")}`
+        }.`
     );
   }
 

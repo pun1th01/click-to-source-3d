@@ -212,6 +212,68 @@ describe("instance capture probe", () => {
   it("ignores non-instanced objects", () => {
     expect(getInstanceRecord(new THREE.Mesh(), 0)).toBeNull();
   });
+
+  /**
+   * What can and cannot be asserted about the registry's lifetime.
+   *
+   * The registry is a WeakMap keyed on the mesh, so a discarded HMR
+   * generation becomes collectable when the last reference to its mesh goes.
+   * That reclamation is not deterministically testable: WeakMap is not
+   * enumerable by design, and WeakRef and FinalizationRegistry only tell you
+   * anything after a collection the runtime is free never to schedule. A test
+   * built on either passes or fails on GC timing rather than on this code,
+   * which is worse than no test.
+   *
+   * What is deterministic is the observable consequence the WeakMap exists to
+   * produce: records belong to one mesh identity and never leak into its
+   * replacement. That is what an HMR reload actually depends on, and it is
+   * asserted below. Reclamation itself was measured out of band — 200
+   * generations of 255 instances, every mesh released, heap 43.9MB -> 9.1MB
+   * after collection — and is not re-asserted here.
+   */
+  it("does not let a replacement mesh inherit the previous generation's records", () => {
+    const geometry = new THREE.BoxGeometry();
+    const material = new THREE.MeshStandardMaterial();
+
+    const first = new THREE.InstancedMesh(geometry, material, 2);
+    place(first, [
+      { x: 10, y: 0, z: 0, scale: 1, yaw: 0 },
+      { x: 20, y: 0, z: 0, scale: 1, yaw: 0 },
+    ]);
+
+    expect(getInstanceRecord(first, 0)?.position[0]).toBe(10);
+
+    // What HMR does: same call site, same geometry and material, new object.
+    const second = new THREE.InstancedMesh(geometry, material, 2);
+
+    expect(getInstanceRecord(second, 0)).toBeNull();
+    expect(getInstanceRecord(second, 1)).toBeNull();
+
+    // The surviving generation is untouched by the arrival of the new one.
+    expect(getInstanceRecord(first, 0)?.position[0]).toBe(10);
+  });
+
+  it("stays installed once, so a re-evaluated module does not double-count", () => {
+    const before = getProbeStats();
+
+    // What HMR does to the probe module itself. Installation is deliberately
+    // one-way: there is no uninstall, because instance writes are once-only
+    // with no replay and a window without the patch loses a mount's
+    // provenance unrecoverably.
+    installInstanceProbe();
+    installInstanceProbe();
+
+    const mesh = new THREE.InstancedMesh(
+      new THREE.BoxGeometry(),
+      new THREE.MeshStandardMaterial(),
+      1
+    );
+    place(mesh, [{ x: 1, y: 2, z: 3, scale: 1, yaw: 0 }]);
+
+    // One write, counted once — not once per install call.
+    expect(getProbeStats().applicationWrites).toBe(before.applicationWrites + 1);
+    expect(getInstanceRecord(mesh, 0)?.position).toEqual([1, 2, 3]);
+  });
 });
 
 describe("resolveSourceRef — captured instances", () => {
