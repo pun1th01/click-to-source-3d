@@ -18,6 +18,8 @@ import { stampSource } from "./stampSource.js";
 
 const PROBE_MODULE_ID = "virtual:click-to-source-probe";
 
+const TRAILING_SLASHES = new RegExp("/+$");
+
 /** Reads a JSON body, runs a handler, and writes the JSON result. */
 async function handleBridgePost(
   request: IncomingMessage,
@@ -99,6 +101,17 @@ export type ClickToSourceOptions = {
    */
   captureInstances?: boolean;
   /**
+   * Serve the read, write and bridge endpoints to callers beyond this
+   * machine.
+   *
+   * Off by default. The endpoints read and write files under the project
+   * root, and a request with no Origin header is allowed because a local
+   * non-browser client could edit those files directly anyway. Started with
+   * `vite --host`, the same request can arrive from the network, where that
+   * reasoning does not apply. Turn this on only on a network you control.
+   */
+  allowRemote?: boolean;
+  /**
    * Open the scene bridge, letting an out-of-process client ask the running
    * page about its own contents.
    *
@@ -125,6 +138,7 @@ export function clickToSource(options: ClickToSourceOptions = {}): Plugin {
     allowedExtensions:
       options.allowedExtensions ?? [...DEFAULT_ALLOWED_EXTENSIONS],
     allowedOrigins: options.allowedOrigins ?? [],
+    allowRemote: options.allowRemote ?? false,
   };
 
   const stamping = options.stampSource ?? false;
@@ -218,6 +232,33 @@ export function clickToSource(options: ClickToSourceOptions = {}): Plugin {
         server.httpServer?.on("close", () => hub.dispose());
       }
 
+      /**
+       * The server's own origins, read at request time.
+       *
+       * Not captured when the server starts: resolvedUrls is still null at
+       * the httpServer "listening" event and is assigned only after
+       * server.listen() resolves. Reading it eagerly silently yielded an
+       * empty list, which rejected the page's own same-origin requests —
+       * caught by driving the real overlay rather than by a test.
+       */
+      const serverOrigins = (): readonly string[] => {
+        const urls = server.resolvedUrls;
+
+        if (!urls) {
+          return requestOptions.allowedOrigins;
+        }
+
+        return [
+          ...new Set([
+            ...requestOptions.allowedOrigins,
+            // resolvedUrls carry a trailing slash; an Origin header never does.
+            ...[...urls.local, ...urls.network].map((url) =>
+              url.replace(TRAILING_SLASHES, "")
+            ),
+          ]),
+        ];
+      };
+
       server.middlewares.use((request, response, next) => {
         let pathname: string;
 
@@ -269,7 +310,7 @@ export function clickToSource(options: ClickToSourceOptions = {}): Plugin {
             response,
             resolvedConfig.root,
             "read",
-            requestOptions
+            { ...requestOptions, allowedOrigins: serverOrigins() }
           );
           return;
         }
@@ -280,7 +321,7 @@ export function clickToSource(options: ClickToSourceOptions = {}): Plugin {
             response,
             resolvedConfig.root,
             "write",
-            requestOptions
+            { ...requestOptions, allowedOrigins: serverOrigins() }
           );
           return;
         }

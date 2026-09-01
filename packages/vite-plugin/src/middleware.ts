@@ -44,6 +44,11 @@ export const DEFAULT_ALLOWED_EXTENSIONS = [
 export type FileRequestOptions = {
   allowedExtensions: readonly string[];
   allowedOrigins: readonly string[];
+  /**
+   * Callers reachable from outside this machine are refused unless this is
+   * set. See isLoopbackRemote for why the default is closed.
+   */
+  allowRemote?: boolean;
 };
 
 /**
@@ -72,13 +77,53 @@ function isEditableFile(
 }
 
 /**
+ * Whether the caller is on this machine.
+ *
+ * The endpoints read and write files anywhere under the project root, and the
+ * origin check deliberately allows requests with no Origin header on the
+ * grounds that anything with local shell access could edit those files
+ * directly. That reasoning holds only while "local" is true. Started with
+ * `vite --host`, the dev server is reachable from the network, and a plain
+ * curl from another machine carries no Origin and inherits that allowance.
+ *
+ * Loopback is therefore checked separately from origin, and remote callers
+ * are refused unless the consumer opts in.
+ */
+function isLoopbackRemote(request: IncomingMessage): boolean {
+  const address = request.socket?.remoteAddress;
+
+  if (typeof address !== "string" || address.length === 0) {
+    // A socket with no address is a stand-in rather than a real connection;
+    // in-process tests reach the handler this way.
+    return true;
+  }
+
+  // IPv4, IPv4-mapped IPv6, and IPv6 loopback respectively.
+  return (
+    address === "127.0.0.1" ||
+    address.startsWith("127.") ||
+    address === "::1" ||
+    address === "::ffff:127.0.0.1" ||
+    address.startsWith("::ffff:127.")
+  );
+}
+
+/**
  * Rejects cross-origin browser requests.
  *
  * Without this, any page open in the developer's browser can POST to the dev
  * server and read or rewrite files in their project. A request with no Origin
  * header is allowed: that is a non-browser client such as curl or the test
  * suite, and anything with local shell access can edit the files directly
- * anyway, so refusing it buys nothing.
+ * anyway, so refusing it buys nothing. isLoopbackRemote is what keeps
+ * "non-browser client" and "on this machine" from drifting apart.
+ *
+ * An Origin is matched against the server's own origins, which the plugin
+ * supplies from Vite's resolved config. It is deliberately not compared
+ * against this request's Host header: a non-browser client sets both, so
+ * `Origin: http://evil.test` with `Host: evil.test` satisfied that comparison
+ * and was accepted. Measured against the shipped 0.1.0 handler, that returned
+ * 200 and completed the write.
  */
 function isAllowedOrigin(
   request: IncomingMessage,
@@ -96,21 +141,7 @@ function isAllowedOrigin(
     return true;
   }
 
-  if (allowedOrigins.includes(origin)) {
-    return true;
-  }
-
-  const host = request.headers.host;
-
-  if (typeof host !== "string" || host.length === 0) {
-    return false;
-  }
-
-  try {
-    return new URL(origin).host === host;
-  } catch {
-    return false;
-  }
+  return allowedOrigins.includes(origin);
 }
 
 function sendJson(
@@ -288,6 +319,11 @@ export async function handleFileRequest(
   operation: "read" | "write",
   options: FileRequestOptions
 ) {
+  if (!options.allowRemote && !isLoopbackRemote(request)) {
+    sendJson(response, 403, { error: "Remote request rejected" });
+    return;
+  }
+
   if (!isAllowedOrigin(request, options.allowedOrigins)) {
     sendJson(response, 403, { error: "Cross-origin request rejected" });
     return;
