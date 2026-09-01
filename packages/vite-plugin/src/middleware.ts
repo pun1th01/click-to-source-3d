@@ -144,6 +144,31 @@ function isAllowedOrigin(
   return allowedOrigins.includes(origin);
 }
 
+/**
+ * The one caller policy, shared by every endpoint this package serves.
+ *
+ * Exported because the bridge endpoints live in the plugin rather than here,
+ * and when they were wired up they inherited neither check — a page on any
+ * origin could query the running scene, and under `vite --host` so could the
+ * network. Two copies of a policy is how that happened; this is one copy.
+ *
+ * Returns null when the caller is acceptable, or the response to send.
+ */
+export function checkCaller(
+  request: IncomingMessage,
+  options: { allowedOrigins: readonly string[]; allowRemote?: boolean }
+): { status: number; error: string } | null {
+  if (!options.allowRemote && !isLoopbackRemote(request)) {
+    return { status: 403, error: "Remote request rejected" };
+  }
+
+  if (!isAllowedOrigin(request, options.allowedOrigins)) {
+    return { status: 403, error: "Cross-origin request rejected" };
+  }
+
+  return null;
+}
+
 function sendJson(
   response: ServerResponse,
   statusCode: number,
@@ -319,13 +344,10 @@ export async function handleFileRequest(
   operation: "read" | "write",
   options: FileRequestOptions
 ) {
-  if (!options.allowRemote && !isLoopbackRemote(request)) {
-    sendJson(response, 403, { error: "Remote request rejected" });
-    return;
-  }
+  const refusal = checkCaller(request, options);
 
-  if (!isAllowedOrigin(request, options.allowedOrigins)) {
-    sendJson(response, 403, { error: "Cross-origin request rejected" });
+  if (refusal) {
+    sendJson(response, refusal.status, { error: refusal.error });
     return;
   }
 

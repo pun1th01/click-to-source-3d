@@ -33,6 +33,20 @@ Loopback is now checked separately from origin. IPv4, IPv6 and
 IPv4-mapped loopback are accepted; anything else is refused with
 `Remote request rejected` unless the new `allowRemote` option is set.
 
+**The bridge endpoints answer to the same caller policy as the file
+endpoints.** The three `/__cts/bridge/*` paths were wired straight to their
+handlers and inherited neither the origin check nor the loopback guard.
+Measured before the fix: a page on any origin could POST a bridge query and
+get `200`. The query surface is read-only, so this was disclosure rather
+than write access — but it discloses source file paths, function names and
+the argument values a generator was called with, and under `vite --host` it
+disclosed them to the network.
+
+The guard now lives in one exported function that every endpoint calls.
+Two copies of a policy is how the bridge came to have none. The check runs
+before `bridge` is consulted, so a disallowed caller cannot distinguish
+"the bridge is off" from "you may not ask".
+
 ### Added
 
 - `allowRemote` option on `clickToSource()`, default `false`. Turn it on

@@ -10,6 +10,7 @@ import { BridgeHub } from "./bridgeHub.js";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { Plugin, ResolvedConfig } from "vite";
 import {
+  checkCaller,
   DEFAULT_ALLOWED_EXTENSIONS,
   handleFileRequest,
   type FileRequestOptions,
@@ -267,6 +268,30 @@ export function clickToSource(options: ClickToSourceOptions = {}): Plugin {
         } catch {
           next();
           return;
+        }
+
+        // Every bridge path is subject to the same caller policy as the file
+        // endpoints. The query surface is read-only, but it discloses source
+        // paths, function names and argument values, which is not something to
+        // hand to any page that happens to be open — or, under `vite --host`,
+        // to the network. Checked before `bridging` is consulted, so a
+        // disallowed caller cannot even learn whether the bridge is enabled.
+        if (
+          pathname === BRIDGE_EVENTS_PATH ||
+          pathname === BRIDGE_REPLY_PATH ||
+          pathname === BRIDGE_QUERY_PATH
+        ) {
+          const refusal = checkCaller(request, {
+            allowedOrigins: serverOrigins(),
+            allowRemote: requestOptions.allowRemote,
+          });
+
+          if (refusal) {
+            response.statusCode = refusal.status;
+            response.setHeader("Content-Type", "application/json; charset=utf-8");
+            response.end(JSON.stringify({ error: refusal.error }));
+            return;
+          }
         }
 
         if (bridging && pathname === BRIDGE_EVENTS_PATH) {

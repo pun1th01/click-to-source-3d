@@ -5,7 +5,11 @@ import { Readable } from "node:stream";
 import { fileURLToPath } from "node:url";
 import { createServer, type ViteDevServer } from "vite";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { READ_FILE_PATH, WRITE_FILE_PATH } from "@click-to-source-3d/shared";
+import {
+  BRIDGE_QUERY_PATH,
+  READ_FILE_PATH,
+  WRITE_FILE_PATH,
+} from "@click-to-source-3d/shared";
 import { clickToSource } from "../src/plugin.js";
 import { handleFileRequest } from "../src/middleware.js";
 
@@ -311,5 +315,107 @@ describe("callers beyond this machine", () => {
 
   it("allows an IPv4-mapped IPv6 loopback caller", async () => {
     expect((await callFrom("::ffff:127.0.0.1")).status).not.toBe(403);
+  });
+});
+
+/**
+ * Drives the plugin's own middleware stack with a chosen caller.
+ *
+ * The bridge endpoints live in the plugin rather than in handleFileRequest,
+ * so this goes through server.middlewares to exercise the wiring itself. That
+ * wiring is what was missing: the guard existed and the bridge simply never
+ * called it.
+ */
+function callBridge(options: {
+  path: string;
+  remoteAddress?: string;
+  headers?: Record<string, string>;
+}): Promise<{ status: number; body: string }> {
+  return new Promise((resolve) => {
+    const payload = JSON.stringify({
+      query: { kind: "list_scene_provenance" },
+    });
+
+    const request = Object.assign(new Readable({ read() {} }), {
+      method: "POST",
+      url: options.path,
+      headers: {
+        "content-type": "application/json",
+        host,
+        ...(options.headers ?? {}),
+      },
+      socket: { remoteAddress: options.remoteAddress ?? "127.0.0.1" },
+    }) as unknown as IncomingMessage;
+
+    let raw = "";
+    const response = {
+      statusCode: 200,
+      setHeader: () => undefined,
+      getHeader: () => undefined,
+      writeHead: () => response,
+      write: () => true,
+      end: (body?: string) => {
+        raw += body ?? "";
+        resolve({
+          status: (response as unknown as { statusCode: number }).statusCode,
+          body: raw,
+        });
+      },
+    } as unknown as ServerResponse;
+
+    server.middlewares(request as never, response as never, () =>
+      resolve({ status: 0, body: "fell through to next()" })
+    );
+
+    (request as unknown as Readable).push(payload);
+    (request as unknown as Readable).push(null);
+  });
+}
+
+describe("bridge endpoints answer to the same caller policy", () => {
+  // Measured against 0.1.1: this returned 200. The bridge paths were wired
+  // straight to their handlers, so they inherited neither the origin check nor
+  // the loopback guard that the file endpoints get.
+  it("rejects a cross-origin bridge query", async () => {
+    const result = await callBridge({
+      path: BRIDGE_QUERY_PATH,
+      headers: { origin: "http://evil.test" },
+    });
+
+    expect(result.status).toBe(403);
+    expect(JSON.parse(result.body)).toEqual({
+      error: "Cross-origin request rejected",
+    });
+  });
+
+  it("rejects a bridge query from beyond this machine", async () => {
+    const result = await callBridge({
+      path: BRIDGE_QUERY_PATH,
+      remoteAddress: "192.168.1.50",
+    });
+
+    expect(result.status).toBe(403);
+    expect(JSON.parse(result.body)).toEqual({ error: "Remote request rejected" });
+  });
+
+  // The refusal comes before `bridging` is consulted, so a disallowed caller
+  // cannot distinguish "bridge is off" from "you are not allowed to ask".
+  it("does not reveal whether the bridge is enabled", async () => {
+    const result = await callBridge({
+      path: BRIDGE_QUERY_PATH,
+      headers: { origin: "http://evil.test" },
+    });
+
+    expect(result.body).not.toContain("disabled");
+    expect(result.body).not.toContain("bridge: true");
+  });
+
+  it("still serves a same-origin loopback caller", async () => {
+    const result = await callBridge({
+      path: BRIDGE_QUERY_PATH,
+      headers: { origin: `http://${host}` },
+    });
+
+    expect(result.status).not.toBe(403);
   });
 });
