@@ -14,12 +14,21 @@ handler, that returned `200` and completed a write into the project root.
 An `Origin` is now matched against the dev server's own origins, which the
 plugin reads from Vite's resolved URLs.
 
-Two notes on reach. A browser cannot forge `Host`, so this was never a
-browser CSRF vector — a real cross-origin page was rejected in 0.1.0 and
-still is. And Vite's own `allowedHosts` check answers a forged `Host`
-before plugin middleware runs, so a stock Vite server was already covered.
-What was exposed is `handleFileRequest` itself, which is documented as
-reusable by other dev servers and takes only `node:http` types.
+On reach, corrected after publishing 0.1.1: this one was not reachable.
+A browser cannot forge `Host`, so it was never a browser CSRF vector — a
+real cross-origin page was rejected in 0.1.0 and still is. Vite's own
+`allowedHosts` check answers a forged `Host` before plugin middleware
+runs, so a stock Vite server was already covered. The first version of
+this entry said the exposed surface was `handleFileRequest`, on the
+grounds that its documentation offers it to other dev servers; but the
+package does not export it, so no consumer can reach it. That reuse is a
+design intention, not a shipped capability.
+
+So this change fixes a check that was wrong in principle, with no
+demonstrated path to exploitation. The two below are different: a page
+open in the browser could query the bridge cross-origin and receive
+`200`, observed directly; and the file endpoints accepted a caller whose
+socket was not on loopback.
 
 **Requests from outside this machine are refused by default.**
 The endpoints allow a request with no `Origin` header, on the stated
