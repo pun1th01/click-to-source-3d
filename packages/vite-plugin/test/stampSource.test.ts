@@ -98,6 +98,57 @@ describe("stampSource", () => {
     expect(out).toContain("line: 3");
   });
 
+  /**
+   * A spread can carry userData, and appending the stamp after it made the
+   * stamp win — destroying a hand-written sourceRef, which is the documented
+   * override for anything the transform gets wrong. Whether a given spread
+   * carries userData is a runtime value, so the fix is positional.
+   */
+  describe("spread attributes", () => {
+    it("emits the stamp before a spread, so an author's userData wins", () => {
+      const out = stamp("const A = (props) => <mesh {...props} />;");
+
+      expect(out).toContain("<mesh userData={{ __ctsSource:");
+      expect(out.indexOf("userData=")).toBeLessThan(out.indexOf("{...props}"));
+    });
+
+    it("goes ahead of the first of several spreads", () => {
+      const out = stamp("const A = (a, b) => <mesh {...a} {...b} />;");
+
+      expect(out.indexOf("userData=")).toBeLessThan(out.indexOf("{...a}"));
+    });
+
+    it("goes ahead of a spread that is not the first attribute", () => {
+      const out = stamp(
+        "const A = (props) => <mesh position={[0,0,0]} {...props} scale={2} />;"
+      );
+
+      expect(out.indexOf("userData=")).toBeGreaterThan(out.indexOf("position="));
+      expect(out.indexOf("userData=")).toBeLessThan(out.indexOf("{...props}"));
+    });
+
+    // An explicit userData already outranks any spread before it, so the
+    // existing merge is correct and must keep applying rather than being
+    // replaced by the positional path.
+    it("still merges into an explicit userData that follows a spread", () => {
+      const out = stamp(
+        "const A = (props) => <mesh {...props} userData={{ x: 1 }} />;"
+      );
+
+      expect(out).toContain("userData={{ ...{ x: 1 }, __ctsSource:");
+      expect(out.indexOf("{...props}")).toBeLessThan(out.indexOf("userData="));
+    });
+
+    // The regression boundary: nothing without a spread changes.
+    it("leaves elements with no spread exactly where they were", () => {
+      const out = stamp("const A = () => <mesh scale={2} />;");
+
+      expect(out).toBe(
+        'const A = () => <mesh scale={2} userData={{ __ctsSource: { file: "src/components/Water.jsx", function: "A", line: 1 } }} />;'
+      );
+    });
+  });
+
   it("returns null when there is nothing to stamp", () => {
     expect(stampSource("export const x = 1;", FILE, { root: ROOT })).toBeNull();
     expect(

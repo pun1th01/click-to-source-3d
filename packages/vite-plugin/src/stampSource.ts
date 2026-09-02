@@ -214,6 +214,38 @@ export function stampSource(
     );
 
     if (!existing) {
+      const firstSpread = attributes.find(
+        (attribute) => attribute.type === "JSXSpreadAttribute"
+      );
+
+      if (firstSpread) {
+        // Ahead of the spread, not after it.
+        //
+        // A spread can carry userData, and appending after it made the stamp
+        // win — silently destroying a hand-written sourceRef, which is the
+        // documented escape hatch for anything the transform gets wrong.
+        // Whether a given spread carries userData is a runtime value and
+        // cannot be read here, so the fix is positional: emitted first, the
+        // stamp is overwritten by a spread that has userData and survives one
+        // that does not. That is the same precedence the resolver applies
+        // everywhere else — manual outranks stamped — and it costs no
+        // re-evaluation of the spread expression.
+        //
+        // The trade is real: an element whose spread carries userData loses
+        // its stamp and resolves through the parent walk instead. Keeping
+        // both would mean emitting `{ ...props.userData, __ctsSource }`, which
+        // re-evaluates the spread argument — safe for an identifier, wrong for
+        // `{...getProps()}`.
+        //
+        // Elements with no spread are untouched: same insertion point, same
+        // bytes as before.
+        magic.appendLeft(
+          firstSpread.start as number,
+          `userData={{ __ctsSource: ${stamp} }} `
+        );
+        return true;
+      }
+
       // Insert before the closing bracket of the opening element. A
       // self-closing tag already has a space before its slash, so only add one
       // when the preceding character is not whitespace.

@@ -25,6 +25,8 @@ import { createRoot, type Root } from "react-dom/client";
  */
 
 const invalidate = vi.fn();
+let frameCallback: ((state: unknown) => void) | null = null;
+let framePriority: number | undefined;
 const gl = {
   getPixelRatio: () => 1,
   getSize: (target: THREE.Vector2) => target.set(800, 600),
@@ -42,7 +44,10 @@ vi.mock("@react-three/fiber", () => ({
     invalidate,
     frameloop: "demand" as const,
   }),
-  useFrame: () => undefined,
+  useFrame: (callback: (state: unknown) => void, priority?: number) => {
+    frameCallback = callback;
+    framePriority = priority;
+  },
 }));
 
 const { SelectionHighlight } = await import(
@@ -106,5 +111,47 @@ describe("SelectionHighlight frame requests", () => {
     });
 
     expect(invalidate).toHaveBeenCalled();
+  });
+});
+
+/**
+ * With nothing selected, the component must render the way R3F would have.
+ *
+ * A useFrame with priority above 0 makes R3F stop rendering entirely — its own
+ * call is `gl.render(scene, camera)`, made only when no subscriber has claimed
+ * a priority. So every frame in the host application goes through this
+ * callback for as long as the component is mounted, and sending them all
+ * through the EffectComposer cost the whole app its antialiasing: the default
+ * render target is built without `samples`.
+ *
+ * Only the idle branch is exercised. The selected branch calls
+ * composer.render(), which needs a GL context that does not exist here — the
+ * same boundary the frame-request tests above run into.
+ */
+describe("SelectionHighlight idle rendering", () => {
+  beforeEach(() => {
+    frameCallback = null;
+    framePriority = undefined;
+    act(() => {
+      useOverlayStore.getState().clearSelection();
+    });
+  });
+
+  it("claims a priority, which is what makes R3F hand over the render", () => {
+    mount();
+
+    expect(framePriority).toBeGreaterThan(0);
+  });
+
+  it("renders through R3F's own path while nothing is selected", () => {
+    mount();
+
+    const render = vi.fn();
+    const scene = new THREE.Scene();
+    const camera = new THREE.PerspectiveCamera();
+
+    frameCallback?.({ gl: { render }, scene, camera });
+
+    expect(render).toHaveBeenCalledWith(scene, camera);
   });
 });

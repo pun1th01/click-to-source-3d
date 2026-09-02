@@ -145,9 +145,27 @@ export function SelectionHighlight() {
     }
   }, [gl, frameloop]);
 
-  // Handle rendering lifecycle
-  // priority 1 ensures this runs after R3F's internal updates but we take over the final render
-  useFrame(() => {
+  // Handle rendering lifecycle.
+  //
+  // priority 1 makes R3F stop rendering and hand the final render to this
+  // subscriber — its own is `gl.render(scene, camera)`, run only when no
+  // useFrame has claimed a priority. So while this component is mounted,
+  // every frame in the application goes through whatever this does.
+  //
+  // With nothing selected it therefore does exactly what R3F would have.
+  // Going through the composer regardless was not merely an extra offscreen
+  // pass and an OutputPass quad every frame: EffectComposer's default render
+  // target is created without `samples`, so the whole application silently
+  // lost MSAA from the moment this mounted, selected or not. Antialiasing is
+  // still absent while something IS selected — restoring it there means
+  // passing a multisampled target, whose memory cost is several times the
+  // composer's current footprint and is not worth paying for an outline.
+  useFrame((state) => {
+    if (!selectedObject) {
+      state.gl.render(state.scene, state.camera);
+      return;
+    }
+
     composer.render();
   }, 1);
 
