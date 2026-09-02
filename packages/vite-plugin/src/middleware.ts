@@ -404,8 +404,14 @@ export async function handleFileRequest(
         content = editSource(source, writeRequest.edit);
       } catch (error) {
         if (error instanceof SourceEditError) {
+          // The editor's message, not a generic stand-in for it. Both clients
+          // read `error` as the human-readable half, so replacing the constant
+          // here is what carries "declared at line 2" to the panel and to an
+          // agent; sending it under a new key would have reached neither
+          // without changing them too. `code` is unchanged and still the field
+          // to branch on.
           sendJson(response, 400, {
-            error: "Source edit failed",
+            error: error.message,
             code: error.code,
           });
           return;
