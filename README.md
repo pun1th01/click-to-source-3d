@@ -12,6 +12,24 @@ Developers working on Three.js and React Three Fiber scenes often spend signific
 
 Unlike DOM-focused click-to-source tools or general Three.js scene inspectors, this tool traces rendered objects back to the exact generator function and arguments that created them, not just their current runtime state.
 
+![The panel naming the file, function and line for a ground plane that carries
+no metadata in source](docs/assets/panel-stamped-only.png)
+
+*No metadata was written for this object. The build-time transform stamps every
+host element with its own source location, so clicking an untagged mesh still
+names the file, function and line that produced it.*
+
+![The panel resolving one tree inside a 120-instance InstancedMesh](docs/assets/panel-instanced.png)
+
+*One `InstancedMesh`, 120 trees. The panel resolves the individual instance you
+clicked and shows the transform that placed it. Instanced values are read-only,
+and the outline is mesh-wide, so every instance lights up.*
+
+![The panel showing an editable argument with a Save button](docs/assets/panel-editable.png)
+
+*Where you have written `args` by hand, values become editable. Save rewrites
+the literal in your source and Vite hot-reloads.*
+
 ## Goals
 
 - **Runtime Provenance** — Track which source code and parameters produced each rendered object.
