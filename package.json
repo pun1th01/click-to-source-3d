@@ -22,6 +22,12 @@
   "workspaces": [
     "packages/*"
   ],
+  "scripts": {
+    "//build": "Dependency order, spelled out. `npm run build --workspaces` runs them alphabetically, which puts examples second and vite-plugin last — and the example's vite.config imports the plugin from its dist, so on a clean clone that ordering fails before the plugin exists.",
+    "build": "npm run build -w @click-to-source-3d/shared -w @click-to-source-3d/core -w @click-to-source-3d/overlay -w @click-to-source-3d/vite-plugin -w @click-to-source-3d/mcp -w @click-to-source-3d/examples",
+    "clean": "npm run clean --workspaces --if-present",
+    "test": "npm test --workspaces --if-present"
+  },
   "engines": {
     "node": ">=18.0.0"
   },
