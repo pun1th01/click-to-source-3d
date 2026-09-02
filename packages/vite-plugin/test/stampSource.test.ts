@@ -1,3 +1,4 @@
+import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { stampSource } from "../src/stampSource.js";
 
@@ -30,14 +31,24 @@ describe("stampSource", () => {
     expect(out).not.toContain("/project/src");
   });
 
-  it("normalises separators so Windows paths do not leak backslashes", () => {
+  // Built with the ambient `path` rather than hardcoded Windows literals.
+  // relativeFile uses path.relative and path.sep, both of which follow the
+  // platform, so a test that pins win32 strings only agrees with the code on
+  // win32 — on Linux posix reads "C:\project\src\Scene.jsx" as one filename
+  // containing backslashes and returns "../C:\project\src\Scene.jsx". Native
+  // paths assert the invariant that actually matters on both: the emitted
+  // path is root-relative and separated by forward slashes, whatever the
+  // platform separates by.
+  it("emits forward slashes whatever the platform separates by", () => {
+    const root = path.resolve("project");
     const result = stampSource(
       "const A = () => <mesh />;",
-      "C:\\project\\src\\Scene.jsx",
-      { root: "C:\\project" }
+      path.join(root, "src", "Scene.jsx"),
+      { root }
     );
 
     expect(result?.code).toContain('"src/Scene.jsx"');
+    expect(result?.code).not.toContain("\\");
   });
 
   it("merges into existing userData without clobbering it", () => {

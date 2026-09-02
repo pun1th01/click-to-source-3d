@@ -1,4 +1,4 @@
-import { promises as fs } from "node:fs";
+import fsSync, { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -18,7 +18,47 @@ const REF = (file: string, fn: string) =>
 
 let root: string;
 let outside: string;
-let linksSupported = false;
+
+/**
+ * Whether this platform can create a symlink at all, decided synchronously at
+ * module scope.
+ *
+ * It has to be known before `describe` runs. `it.runIf(...)` evaluates its
+ * condition during collection, and `beforeAll` runs after collection — so a
+ * flag assigned in `beforeAll` is still false when runIf reads it, and the
+ * guarded tests skip on every platform including the ones where symlinks work
+ * perfectly well. That is exactly what happened: these tests skipped on Linux
+ * CI for the same reason they skip on Windows, and nothing said so.
+ */
+const linksSupported = (() => {
+  let probe: string | undefined;
+
+  try {
+    probe = fsSync.mkdtempSync(path.join(os.tmpdir(), "cts-symprobe-"));
+    fsSync.writeFileSync(path.join(probe, "target.ts"), "");
+    fsSync.symlinkSync(
+      path.join(probe, "target.ts"),
+      path.join(probe, "link.ts"),
+      "file"
+    );
+
+    return true;
+  } catch {
+    // Needs elevation or Developer Mode on Windows. Said out loud, because a
+    // name in a skip list does not tell you what stopped being checked.
+    console.warn(
+      "[cts] symlink containment tests SKIPPED — fs.symlink is unavailable " +
+        "(needs elevation or Developer Mode on Windows). The scanner's " +
+        "containment boundary is UNVERIFIED on this platform."
+    );
+
+    return false;
+  } finally {
+    if (probe) {
+      fsSync.rmSync(probe, { recursive: true, force: true });
+    }
+  }
+})();
 
 beforeAll(async () => {
   const base = await fs.mkdtemp(path.join(os.tmpdir(), "cts-scan-"));
@@ -31,30 +71,15 @@ beforeAll(async () => {
   await fs.writeFile(path.join(root, "src", "inRoot.ts"), REF("src/inRoot.ts", "inRoot"));
   await fs.writeFile(path.join(outside, "secret.ts"), REF("secret.ts", "outsideTheRoot"));
 
-  // Creating a symlink needs elevation or Developer Mode on Windows. When it
-  // is unavailable the containment tests skip rather than pass vacuously —
-  // a silent pass here would be worse than no test, since it would report
-  // the boundary as verified on a platform where it was never exercised.
-  try {
+  // Only where the probe above already proved it works. Failing here would
+  // abort the whole file rather than skip the two tests that need them.
+  if (linksSupported) {
     await fs.symlink(
       path.join(outside, "secret.ts"),
       path.join(root, "src", "linked.ts"),
       "file"
     );
     await fs.symlink(outside, path.join(root, "src", "linkedDir"), "dir");
-    linksSupported = true;
-  } catch {
-    linksSupported = false;
-
-    // Named at the moment it is decided. The runner reports skips by name
-    // rather than as a count, but a name alone does not say what stopped
-    // being checked — and "2 skipped" in a log nobody opens is how a
-    // security-shaped boundary quietly becomes untested.
-    console.warn(
-      "[cts] symlink containment tests SKIPPED — fs.symlink is unavailable " +
-        "(needs elevation or Developer Mode on Windows). The scanner's " +
-        "containment boundary is UNVERIFIED on this platform."
-    );
   }
 });
 
