@@ -1,5 +1,7 @@
 # Click-to-Source 3D
 
+[![CI](https://github.com/pun1th01/click-to-source-3d/actions/workflows/ci.yml/badge.svg)](https://github.com/pun1th01/click-to-source-3d/actions/workflows/ci.yml)
+
 **Source-level debugging for React Three Fiber.**
 
 ---
@@ -42,7 +44,7 @@ the literal in your source and Vite hot-reloads.*
 
 ## Current Status
 
-**Stage 7 — release.** Five packages at `0.1.2`, versioned in lockstep and
+**Stage 7 — release.** Five packages at `0.1.3`, versioned in lockstep and
 verified by installing all five into a consumer outside this repository.
 
 `0.1.x` is deliberate rather than modest: instanced provenance is read-only,

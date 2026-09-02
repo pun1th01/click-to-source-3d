@@ -2,6 +2,82 @@
 
 All five packages are versioned in lockstep.
 
+## 0.1.3
+
+Only `mcp` and `vite-plugin` change behaviour; the other three move with
+them by convention.
+
+### Added — `@click-to-source-3d/mcp`
+
+**`get_source` takes a line instead of a range.** A caller arriving from
+`list_provenance` or a bridge resolve holds one line, and turning that into
+a range was arithmetic it had no basis for. `around` centres a window on a
+line, with `contextLines` either side, defaulting to 20. Explicit bounds
+still win per edge, so a caller that did compute a range gets exactly that
+range and one that computed a single edge gets the other centred.
+
+Passing no bounds at all has always read the whole file. Nothing said so,
+and the schema advertised `startLine` and `endLine`, so the description now
+names it as the right default.
+
+**`list_files`** answers the question an agent has before it can call
+anything else: what is here. It reports names only, reads no contents, and
+is deliberately not a file browser — it returns exactly the set the
+provenance scan would read, so a file it does not list is a file no other
+tool in this package can reach. The walk is now shared with the scanner
+rather than duplicated, so the two cannot drift.
+
+The 2000-file scan limit was previously silent, making a partial scan
+indistinguishable from a complete one. `list_files` reports `truncated`.
+
+### Fixed
+
+**A failed source edit now says why it failed.** `editSource` has always
+produced a specific reason — which argument, at which line, and since 0.1.2
+the lines it is actually declared on — and the dev-server middleware
+replaced all of it with the constant "Source edit failed" before sending.
+Both halves of the product read `error` as the human-readable message, so
+neither the panel nor an agent ever saw any of it. The 0.1.2 change that
+added "declared at line N" improved a string that could not reach a caller.
+`code` is unchanged and remains the field to branch on.
+
+**`list_provenance` no longer implies a project has no provenance.** It
+described itself as listing "every declared provenance site", which is
+false in the configuration the README recommends: stamped locations live in
+transformed output and the scanner cannot see them, so a `stampSource`-only
+project got an empty array against a description promising completeness.
+It now says an empty result means no hand-written `sourceRef`, names the
+bridge tools that do see stamped objects, and points at `list_files`.
+
+Teaching the scanner to read stamps is the real fix and is not a patch.
+
+### Repository
+
+These do not ship in any package.
+
+**`npm run build` works on a clean clone.** There were no root scripts, so
+the obvious command was `npm run build --workspaces`, which runs workspaces
+alphabetically and builds `examples` before `vite-plugin` — and the
+example's Vite config imports the plugin from its `dist`. Exit 1 before,
+exit 0 after.
+
+**CI runs the tests.** It previously ran `npm ci` and `npm ls --workspaces`
+and nothing else: 166 tests existed and none executed anywhere. It now
+builds and tests on ubuntu-latest and windows-latest across Node 20 and 22,
+with skips reported by name on every platform rather than reduced to a
+count.
+
+Its first run found two tests that only agreed with the platform that wrote
+them. One asserted Windows path separators through the ambient `path`
+module, which is posix on Linux. The other is worse: the scanner's symlink
+containment tests had never executed anywhere. `it.runIf` evaluates its
+condition during collection and `beforeAll` runs after collection, so the
+flag was always false when it was read — and a guard added to catch exactly
+that read the flag at run time instead, and so reported on Linux that tests
+which had been skipped had run. Until this release, deleting the symlink
+check from the scanner would have left the suite green. Both tests now run
+on the platforms that can run them.
+
 ## 0.1.2
 
 ### Fixed — install
