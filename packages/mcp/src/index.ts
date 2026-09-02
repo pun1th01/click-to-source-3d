@@ -1,6 +1,7 @@
 export {
   getSource,
   editParameterTool,
+  listFiles,
   listProvenance,
   searchByGenerator,
   type ToolContext,

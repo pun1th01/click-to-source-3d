@@ -18,6 +18,7 @@ import {
 import {
   editParameterTool,
   getSource,
+  listFiles,
   listProvenance,
   searchByGenerator,
   type ToolContext,
@@ -32,9 +33,12 @@ const TOOLS = [
   {
     name: "get_source",
     description:
-      "Read a source file from the running Click-to-Source project, optionally " +
-      "a line range. Subject to the same extension allowlist as the overlay " +
-      "panel, so only editable source files are reachable.",
+      "Read a source file from the running Click-to-Source project. Pass no " +
+      "line bounds at all to read the whole file, or `around` to read a window " +
+      "centred on one line — which is the usual next step after list_provenance " +
+      "or resolve_at_point hands you a line. Subject to the same extension " +
+      "allowlist as the overlay panel, so only editable source files are " +
+      "reachable.",
     inputSchema: {
       type: "object",
       properties: {
@@ -42,8 +46,24 @@ const TOOLS = [
           type: "string",
           description: "Path relative to the Vite project root, e.g. src/components/Trees.jsx",
         },
-        startLine: { type: "number", description: "1-indexed, inclusive" },
-        endLine: { type: "number", description: "1-indexed, inclusive" },
+        around: {
+          type: "number",
+          description:
+            "1-indexed line to centre a window on. Reads contextLines either " +
+            "side. Ignored for whichever bound startLine or endLine supplies.",
+        },
+        contextLines: {
+          type: "number",
+          description: "Lines either side of `around`. Defaults to 20.",
+        },
+        startLine: {
+          type: "number",
+          description: "1-indexed, inclusive. Overrides the start of `around`.",
+        },
+        endLine: {
+          type: "number",
+          description: "1-indexed, inclusive. Overrides the end of `around`.",
+        },
       },
       required: ["file"],
     },
@@ -72,11 +92,29 @@ const TOOLS = [
     },
   },
   {
+    name: "list_files",
+    description:
+      "List the source files the scanning tools can see, for when you do not " +
+      "know what the project contains. This is not a file browser: it reports " +
+      "exactly the set the provenance scan would read — recognised source " +
+      "extensions under the project root, excluding dotfiles, node_modules, " +
+      "dist, build, .git, .vite and coverage, and not following symlinks. " +
+      "Files outside that set are invisible here whether or not they exist. " +
+      "Reads no contents. Reports the root it walked, and whether it stopped " +
+      "at the scan limit before finishing.",
+    inputSchema: { type: "object", properties: {} },
+  },
+  {
     name: "list_provenance",
     description:
-      "List every declared provenance site in the project, by static scan. " +
+      "List every hand-written sourceRef in the project, by static scan. " +
       "Reports what the source says, not what is currently rendered — an object " +
-      "only exists after a mount, and this cannot see the running scene.",
+      "only exists after a mount, and this cannot see the running scene. " +
+      "An empty result means no hand-written sourceRef, NOT that the project " +
+      "has no provenance: locations stamped by the Vite plugin live in " +
+      "transformed output, are invisible to this scan, and still resolve " +
+      "through the panel and through list_scene_provenance, resolve_at_point " +
+      "and get_instance_provenance. Use list_files to see what source exists.",
     inputSchema: {
       type: "object",
       properties: {
@@ -173,6 +211,9 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         break;
       case "edit_parameter":
         result = await editParameterTool(context, args as never);
+        break;
+      case "list_files":
+        result = await listFiles(context);
         break;
       case "list_provenance":
         result = await listProvenance(context, args as never);
