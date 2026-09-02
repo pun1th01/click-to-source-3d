@@ -205,6 +205,11 @@ function App() {
         camera={{ position: [0, 6, 18], fov: 50 }}
         onPointerMissed={handlePointerMissed}
       >
+        {/* Without a scene background the canvas is transparent, and
+            everything above the ground plane shows the white page through it,
+            which reads as a rendering fault rather than an empty sky. */}
+        <color attach="background" args={["#1a1d26"]} />
+
         {/* Inside the Canvas: the bridge needs a scene and a camera, which
             only a component in the R3F tree can supply. */}
         <ClickToSourceBridge />

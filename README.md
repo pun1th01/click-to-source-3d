@@ -23,7 +23,9 @@ names the file, function and line that produced it.*
 
 *One `InstancedMesh`, 120 trees. The panel resolves the individual instance you
 clicked and shows the transform that placed it. Instanced values are read-only,
-and the outline is mesh-wide, so every instance lights up.*
+and the outline is mesh-wide, so every instance lights up. In the expanded
+details, `object.type` reads `Mesh`: three.js gives `InstancedMesh` no `type`
+string of its own, so the summary line above is what tells the two apart.*
 
 ![The panel showing an editable argument with a Save button](docs/assets/panel-editable.png)
 
