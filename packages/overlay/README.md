@@ -27,8 +27,7 @@ Two installs bring four packages; `core` and `shared` arrive as dependencies.
 
 Five things go into your app.
 
-**1. The plugin, before `react()`** — both declare `enforce: "pre"`, and
-`react()` leaves no JSX to stamp:
+**1. The plugin**, conventionally listed before `react()`:
 
     // vite.config.js
     plugins: [clickToSource({ stampSource: true, captureInstances: true }), react()]

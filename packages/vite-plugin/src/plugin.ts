@@ -81,9 +81,12 @@ export type ClickToSourceOptions = {
    * no user-facing benefit, since the overlay that reads these is not in a
    * production bundle.
    *
-   * Requires this plugin to be listed BEFORE the React plugin. Both declare
-   * enforce: "pre", so Vite preserves array order between them, and a React
-   * plugin running first leaves no JSX to stamp.
+   * Stamping needs JSX still to be present when this plugin's transform runs.
+   * @vitejs/plugin-react performs no JSX transform of its own — it configures
+   * Vite's, which runs later — so either plugin order stamps identically. A
+   * React plugin that does compile JSX in a "pre" transform of its own would
+   * consume it first if listed first; the transform below warns when it finds
+   * a .jsx/.tsx file with no JSX left in it.
    */
   stampSource?: boolean | "always";
   /**

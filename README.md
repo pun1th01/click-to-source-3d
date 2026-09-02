@@ -80,7 +80,6 @@ import react from '@vitejs/plugin-react';
 import { clickToSource } from '@click-to-source-3d/vite-plugin';
 
 export default defineConfig({
-  // clickToSource() MUST come before react().
   plugins: [
     clickToSource({
       stampSource: true,      // stamp file/function/line into userData
@@ -92,11 +91,10 @@ export default defineConfig({
 });
 ```
 
-**The order matters and fails silently if you get it wrong.** Both plugins
-declare `enforce: "pre"`, so Vite preserves array order between them. Put
-`react()` first and it compiles the JSX away before stamping runs — there are
-no JSX elements left to stamp. Nothing errors and nothing warns; you simply get
-objects with no provenance, which looks like the tool not working.
+Listing `clickToSource()` first is habit worth keeping, but with
+`@vitejs/plugin-react` either order stamps identically: that plugin performs no
+JSX transform of its own, so there is nothing for it to consume before this one
+runs. If stamping ever produces nothing, the plugin says so and names the fix.
 
 ### 3. The JSX
 

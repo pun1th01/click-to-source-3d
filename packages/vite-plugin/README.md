@@ -23,8 +23,6 @@ and [`@click-to-source-3d/mcp`](https://www.npmjs.com/package/@click-to-source-3
     import react from "@vitejs/plugin-react";
 
     export default defineConfig({
-      // clickToSource must precede react(): both declare enforce "pre", so
-      // Vite keeps array order between them, and react() leaves no JSX to stamp.
       plugins: [
         clickToSource({
           stampSource: true,      // write source locations into userData
