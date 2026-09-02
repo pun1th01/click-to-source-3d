@@ -7,18 +7,23 @@ on:
     branches: [main]
 
 jobs:
-  build:
-    runs-on: ubuntu-latest
+  test:
+    name: ${{ matrix.os }} · node ${{ matrix.node-version }}
+    runs-on: ${{ matrix.os }}
 
     strategy:
+      # Without this the first red leg cancels the rest, and a break that is
+      # specific to one platform or one Node version looks the same as one
+      # that is not — which is the only reason the matrix exists.
+      fail-fast: false
       matrix:
-        node-version: [18, 20]
+        os: [ubuntu-latest, windows-latest]
+        node-version: [20, 22]
 
     steps:
       - uses: actions/checkout@v4
 
-      - name: Use Node.js ${{ matrix.node-version }}
-        uses: actions/setup-node@v4
+      - uses: actions/setup-node@v4
         with:
           node-version: ${{ matrix.node-version }}
           cache: "npm"
@@ -26,5 +31,20 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Verify workspace structure
+      - name: Verify workspace integrity
         run: npm ls --workspaces
+
+      # The root script, which builds in dependency order. `npm run build
+      # --workspaces` sorts alphabetically and puts examples ahead of
+      # vite-plugin, which fails from a clean checkout — which is every run
+      # here.
+      - name: Build
+        run: npm run build
+
+      # --reporter=verbose on every platform, not just the ones expected to
+      # skip. A skip is reported as a name rather than added to a count, so
+      # coverage that quietly stops running is visible in the log wherever it
+      # happens. A conditional here would restore the blind spot on whichever
+      # platform was left out.
+      - name: Test
+        run: npm test -- --reporter=verbose

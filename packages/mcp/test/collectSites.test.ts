@@ -45,6 +45,16 @@ beforeAll(async () => {
     linksSupported = true;
   } catch {
     linksSupported = false;
+
+    // Named at the moment it is decided. The runner reports skips by name
+    // rather than as a count, but a name alone does not say what stopped
+    // being checked — and "2 skipped" in a log nobody opens is how a
+    // security-shaped boundary quietly becomes untested.
+    console.warn(
+      "[cts] symlink containment tests SKIPPED — fs.symlink is unavailable " +
+        "(needs elevation or Developer Mode on Windows). The scanner's " +
+        "containment boundary is UNVERIFIED on this platform."
+    );
   }
 });
 
@@ -79,6 +89,18 @@ describe("provenance scan containment", () => {
       expect(
         sites.filter((site) => site.file.startsWith("src/linkedDir"))
       ).toHaveLength(0);
+    }
+  );
+
+  // Skipping is correct on Windows without elevation, and wrong anywhere
+  // else. The two tests above are the only coverage of the scanner's
+  // containment boundary, so a platform that silently stops running them
+  // should fail rather than stay green — otherwise the boundary is untested
+  // and nothing says so.
+  it.runIf(process.platform !== "win32")(
+    "can create symlinks, so the containment tests above actually ran",
+    () => {
+      expect(linksSupported).toBe(true);
     }
   );
 });
