@@ -23,7 +23,7 @@
     "access": "public"
   },
   "engines": {
-    "node": ">=18.0.0"
+    "node": ">=20.19.0"
   },
   "scripts": {
     "clean": "node -e \"const f=require('fs');f.rmSync('dist',{recursive:true,force:true});f.rmSync('tsconfig.tsbuildinfo',{force:true})\"",

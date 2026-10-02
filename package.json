@@ -29,7 +29,7 @@
     "test": "npm test --workspaces --if-present"
   },
   "engines": {
-    "node": ">=18.0.0"
+    "node": ">=20.19.0"
   },
   "devDependencies": {
     "@types/node": "^26.2.0",

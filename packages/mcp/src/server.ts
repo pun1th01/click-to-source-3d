@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { createRequire } from "node:module";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import {
@@ -192,8 +193,14 @@ const TOOLS = [
   },
 ];
 
+// Read from the manifest that ships beside dist/. A literal here reported
+// 0.1.0 to clients through 0.1.1, because a release bump never touched it.
+const { version } = createRequire(import.meta.url)("../package.json") as {
+  version: string;
+};
+
 const server = new Server(
-  { name: "click-to-source", version: "0.1.3" },
+  { name: "click-to-source", version },
   { capabilities: { tools: {} } }
 );
 

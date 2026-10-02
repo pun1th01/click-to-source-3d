@@ -18,7 +18,8 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest]
-        node-version: [20, 22]
+        # The two supported LTS lines. 20 reached end of life in April 2026.
+        node-version: [22, 24]
 
     steps:
       - uses: actions/checkout@v4
