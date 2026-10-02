@@ -6,11 +6,7 @@ import {
   type ProvenanceAddress,
   type SourceStamp,
 } from "@click-to-source-3d/shared";
-import {
-  getInstanceRecord,
-  getProbeStats,
-  hasInstanceRecords,
-} from "./instanceCapture.js";
+import { getInstanceRecord } from "./instanceCapture.js";
 import { resolveSourceRef } from "./resolver.js";
 
 /**
@@ -228,57 +224,19 @@ export function answerBridgeQuery(query: BridgeQuery): unknown {
     };
   }
 
-  // The count-aware sweep lives in getInstanceRecord: a slot past a shrunken
-  // count, or one whose recorded count no longer matches, yields nothing
-  // rather than the previous generation's transform.
+  // Read live from the instance buffer, so the only slot with nothing to
+  // report is one three neither renders nor raycasts: outside [0, count).
   const record = getInstanceRecord(mesh, instanceId);
 
   if (!record) {
-    // Four different situations produce a null record, and they need
-    // opposite responses. Collapsing them into one message is what made this
-    // misleading: a consumer who never switched capture on was told their
-    // instance count had changed, which is a confident explanation of
-    // something that never happened.
-    //
     // `cause` is the machine-readable half. An agent should branch on it
-    // rather than parse the prose, which is why it is not merely a reworded
-    // reason string.
-    const { cause, reason } = !getProbeStats().installed
-      ? {
-          cause: "probe_not_installed",
-          reason:
-            "the instance capture probe is not installed, so no transform was " +
-            "ever recorded for any mesh. Pass captureInstances: true to " +
-            "clickToSource(), or import @click-to-source-3d/core/probe as the " +
-            "first statement of the entry module.",
-        }
-      : instanceId >= mesh.count
-        ? {
-            cause: "instance_out_of_range",
-            reason: `instanceId ${instanceId} is past the mesh's current count of ${mesh.count}.`,
-          }
-        : !hasInstanceRecords(mesh)
-          ? {
-              cause: "no_records_for_mesh",
-              reason:
-                "the probe is installed but never saw a write for this mesh, " +
-                "so its instances were placed before the probe was live. The " +
-                "probe must execute before any scene mounts.",
-            }
-          : {
-              cause: "record_swept",
-              reason:
-                "this slot's record belongs to a generation that is gone. The " +
-                "mesh's instance count changed since the slot was written, and " +
-                "a stale transform is worse than none.",
-            };
-
+    // rather than parse the prose.
     return {
       status: "instance_not_recorded",
       generation,
       count: mesh.count,
-      cause,
-      reason,
+      cause: "instance_out_of_range",
+      reason: `instanceId ${instanceId} is outside the mesh's current count of ${mesh.count}.`,
     };
   }
 

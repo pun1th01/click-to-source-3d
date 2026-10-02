@@ -29,36 +29,30 @@ Provenance comes from either source: `userData.sourceRef`, written by hand, or
 A manual ref wins over a stamp, field by field, so you can correct one value
 without giving up automatic location.
 
-### Per-instance capture
+### Instances
 
-`InstancedMesh` instances have no objects of their own. Install the probe
-before any scene mounts and it records each write:
+`InstancedMesh` instances have no objects of their own. When one is resolved,
+its transform is read from the mesh's instance buffer and reported as `x`,
+`y`, `z`, `scale` and `yaw`, under the location of the mesh itself. Nothing
+needs installing, and it works however the matrices were written.
 
-    import "@click-to-source-3d/core/probe";
-
-The Vite plugin injects this for you under `captureInstances: true`, ahead of
-your entry module, because a probe that arrives after the first scene commits
-captures nothing — and does so silently.
+`@click-to-source-3d/core/probe`, which used to install a capture probe, is now
+a no-op kept so existing imports resolve. Remove the import.
 
 ## Limits
 
 **Instanced provenance is read-only.** A transform placed by a seeded RNG has
 no corresponding literal in source.
 
-**Variant-class values cannot be recovered.** The probe reads a `Matrix4`, so
-it recovers `x`, `y`, `z`, `scale` and `yaw`. Anything not in the transform —
-colour group, species, material variant — is not recoverable by capture. Write
+**Variant-class values cannot be recovered.** A transform holds `x`, `y`, `z`,
+`scale` and `yaw`. Anything not in it — colour group, species, material
+variant — is not recoverable from the mesh. Write
 `userData.instanceSourceRefs` by hand if you need it.
-
-**Stale instance slots are dropped, not guessed.** If a mesh's instance count
-shrinks, the abandoned slots still render and their records are
-indistinguishable from live ones by index alone. They are discarded, because
-confident wrong provenance is worse than none.
 
 ## Subpaths
 
     @click-to-source-3d/core         the public API
-    @click-to-source-3d/core/probe   installs the instance capture probe
+    @click-to-source-3d/core/probe   deprecated no-op, removed in 0.2.0
     @click-to-source-3d/core/bridge  answer bridge queries over your own transport
 
 The `bridge` subpath is only needed if the SSE channel the Vite plugin serves

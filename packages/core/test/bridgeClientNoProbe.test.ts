@@ -3,18 +3,17 @@ import * as THREE from "three";
 import { answerBridgeQuery, setBridgeScene } from "../src/bridgeClient.js";
 
 /**
- * Its own file on purpose. The probe patches prototypes process-globally and
- * has no uninstall, so "never installed" is a state that exists only in a
- * module registry where nothing has installed it. Vitest isolates per file,
- * which makes this the one place the uninstalled case can be observed.
+ * Its own file on purpose: Vitest isolates modules per file, so nothing here
+ * has imported the deprecated probe entry or called installInstanceProbe.
  *
- * Ordering it first inside the main file would work today and break silently
- * the moment someone reorders the tests — the same silence this whole change
- * is about.
+ * Instance provenance used to depend on a probe installed before the first
+ * scene mounted, and without one this query could only explain why it had no
+ * answer. Transforms are now read live, so the uninstalled case must answer
+ * like any other.
  */
 
-describe("answerBridgeQuery with the capture probe absent", () => {
-  it("names the missing probe instead of blaming the instance count", () => {
+describe("answerBridgeQuery with no probe ever installed", () => {
+  it("still resolves an instance", () => {
     const mesh = new THREE.InstancedMesh(
       new THREE.ConeGeometry(1, 2, 6),
       new THREE.MeshStandardMaterial(),
@@ -25,6 +24,11 @@ describe("answerBridgeQuery with the capture probe absent", () => {
       function: "InstancedTreeMesh",
       line: 240,
     };
+
+    const dummy = new THREE.Object3D();
+    dummy.position.set(3, 4, 5);
+    dummy.updateMatrix();
+    mesh.setMatrixAt(25, dummy.matrix);
 
     const scene = new THREE.Scene();
     scene.add(mesh);
@@ -41,12 +45,9 @@ describe("answerBridgeQuery with the capture probe absent", () => {
         ordinal: 0,
         instanceId: 25,
       },
-    }) as { status: string; cause: string; reason: string };
+    }) as { status: string; sourceRef: { args: Record<string, number> } };
 
-    expect(out.status).toBe("instance_not_recorded");
-    expect(out.cause).toBe("probe_not_installed");
-    // The specific wrong answer this replaced: a count that never changed.
-    expect(out.reason).not.toMatch(/count changed/i);
-    expect(out.reason).toMatch(/captureInstances/);
+    expect(out.status).toBe("ready");
+    expect(out.sourceRef.args).toMatchObject({ x: 3, y: 4, z: 5 });
   });
 });

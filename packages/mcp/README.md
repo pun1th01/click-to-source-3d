@@ -55,15 +55,14 @@ no scan can find it.
 seeded RNG, so no literal in source corresponds to it and there is nothing for
 an editor to rewrite.
 
-**Variant-class values are unrecoverable.** Capture reads a `Matrix4`, so it
-returns `x`, `y`, `z`, `scale` and `yaw`. Colour group, species or material
-variant are not in the transform.
+**Variant-class values are unrecoverable.** An instance's transform holds
+`x`, `y`, `z`, `scale` and `yaw`. Colour group, species or material variant
+are not in it.
 
 **Every failure is named rather than timed out.** `disabled`, `disconnected`,
 `ambiguous` (more than one page open — naming which is your choice, not the
-server's), `no_scene`, `timeout`. An instance with no record reports why:
-`probe_not_installed`, `instance_out_of_range`, `no_records_for_mesh` or
-`record_swept`.
+server's), `no_scene`, `timeout`. An instance slot outside the mesh's current
+count reports `instance_out_of_range`.
 
 **Addresses are not stable across a world regeneration.** They are derived from
 source location, so they survive a remount — but if your scene regenerates with

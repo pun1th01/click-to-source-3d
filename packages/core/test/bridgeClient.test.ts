@@ -1,13 +1,11 @@
-import { describe, expect, it, beforeAll } from "vitest";
+import { describe, expect, it } from "vitest";
 import * as THREE from "three";
-import { installInstanceProbe } from "../src/instanceCapture.js";
 import { answerBridgeQuery, setBridgeScene } from "../src/bridgeClient.js";
 
 /**
  * These drive `answerBridgeQuery` directly, which is the function the event
- * stream calls when a query arrives. Nothing here is a stand-in: a real
- * probe, real THREE objects, a real scene graph, and for resolve_at_point a
- * real raycast.
+ * stream calls when a query arrives. Nothing here is a stand-in: real THREE
+ * objects, a real scene graph, and for resolve_at_point a real raycast.
  *
  * That matters because the failure being guarded against is a tool that
  * answers wrongly while every collaborator around it behaves. A test built
@@ -15,11 +13,10 @@ import { answerBridgeQuery, setBridgeScene } from "../src/bridgeClient.js";
  * the code does and report success either way.
  */
 
-beforeAll(() => {
-  installInstanceProbe();
-});
-
-/** Places instances the way a real placement loop does: one shared dummy. */
+/**
+ * Places instances the way the three.js docs do: one shared dummy whose
+ * matrix goes to setMatrixAt directly, with no clone.
+ */
 function place(
   mesh: THREE.InstancedMesh,
   transforms: Array<{ x: number; y: number; z: number; scale: number; yaw: number }>
@@ -31,7 +28,7 @@ function place(
     dummy.rotation.set(0, t.yaw, 0);
     dummy.scale.setScalar(t.scale);
     dummy.updateMatrix();
-    mesh.setMatrixAt(i, dummy.matrix.clone());
+    mesh.setMatrixAt(i, dummy.matrix);
   });
 }
 
@@ -89,7 +86,7 @@ const ADDRESS = {
 };
 
 describe("answerBridgeQuery, against a real scene", () => {
-  it("resolves an instance to its captured transform", () => {
+  it("resolves an instance to its transform", () => {
     const mesh = instancedMesh(3);
     place(mesh, [
       { x: 12.481, y: 4.117, z: -33.902, scale: 1.234, yaw: 0.785 },
@@ -144,8 +141,8 @@ describe("answerBridgeQuery, against a real scene", () => {
     expect(out.nearest[0].ordinal).toBe(0);
   });
 
-  describe("why a slot has no record", () => {
-    it("separates a slot past the count from one that was swept", () => {
+  describe("slots outside the count", () => {
+    it("reports a slot past the count, and follows the count as it changes", () => {
       const mesh = instancedMesh(3);
       place(mesh, [
         { x: 1, y: 0, z: 0, scale: 1, yaw: 0 },
@@ -160,27 +157,18 @@ describe("answerBridgeQuery, against a real scene", () => {
         count: 3,
       });
 
-      // Shrinking the count strands slot 1: it is in range, and its record
-      // belongs to the generation that is gone.
       mesh.count = 2;
 
-      expect(ask({ ...ADDRESS, instanceId: 1 })).toMatchObject({
+      // Slot 2 is no longer rendered; slot 1 still is, and still resolves.
+      expect(ask({ ...ADDRESS, instanceId: 2 })).toMatchObject({
         status: "instance_not_recorded",
-        cause: "record_swept",
+        cause: "instance_out_of_range",
+        count: 2,
       });
-    });
-
-    // The case that produced the misleading message: nothing was ever
-    // captured for this mesh, and the old text called that a count change.
-    it("names a mesh the probe never saw, rather than blaming the count", () => {
-      sceneWith(instancedMesh(4));
-
-      const out = ask({ ...ADDRESS, instanceId: 0 });
-
-      expect(out.status).toBe("instance_not_recorded");
-      expect(out.cause).toBe("no_records_for_mesh");
-      expect(out.reason).not.toMatch(/count changed/i);
-      expect(out.reason).toMatch(/before the probe was live/i);
+      expect(ask({ ...ADDRESS, instanceId: 1 })).toMatchObject({
+        status: "ready",
+        record: { index: 1, countAtWrite: 2 },
+      });
     });
   });
 

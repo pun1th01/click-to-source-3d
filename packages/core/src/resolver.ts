@@ -59,18 +59,18 @@ function resolveInstanceSourceRef(
 }
 
 /**
- * Per-instance resolution from transforms captured by the instance probe.
+ * Per-instance resolution from the transform the slot currently holds, read
+ * live from the mesh's instance buffer.
  *
  * Runs only after the hand-written array has been consulted, and is decided
  * per instance rather than per mesh. A partially populated
  * `instanceSourceRefs` — fewer entries than the mesh has instances — must not
  * cost the uncovered slots their provenance: the existing out-of-bounds path
- * already degrades per instance, and mesh-level precedence would step past
- * captured data that is present and correct in favour of something less
- * specific.
+ * already degrades per instance, and mesh-level precedence would step past a
+ * transform that is present and correct in favour of something less specific.
  *
- * The location comes from the mesh's own provenance, since a captured
- * transform knows the values but not the call site that produced them.
+ * The location comes from the mesh's own provenance, since a transform knows
+ * the values but not the call site that produced them.
  */
 function resolveCapturedInstance(
   object: THREE.Object3D,
@@ -129,10 +129,10 @@ export function resolveSourceRef(
   instanceId?: number
 ): ResolutionResult | null {
   // Per-instance resolution, most specific source first. Hand-written entries
-  // outrank captured ones for the same reason manual outranks stamped
-  // elsewhere, and for one more: the probe cannot always tell a stale slot
-  // from a live one on a mesh whose instance count shrank, whereas an
-  // authored array has no such failure mode.
+  // outrank the live transform for the same reason manual outranks stamped
+  // elsewhere: an author who wrote an entry is stating what that instance
+  // means, which can include values — a variant, a species — that no
+  // transform carries.
   const instanceResult = resolveInstanceSourceRef(object, instanceId);
   if (instanceResult) {
     return instanceResult;

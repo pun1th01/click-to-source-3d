@@ -1,5 +1,15 @@
 # Stage 5 Addendum: Per-Instance Capture
 
+> **Superseded in 0.1.4.** The probe described here paired each
+> `setMatrixAt` write with an earlier `Matrix4.clone()`, so the placement
+> loop the three.js docs teach — `mesh.setMatrixAt(i, dummy.matrix)`, one
+> shared matrix every iteration — was measured capturing 0 of 500 instances.
+> Transforms are now read from `instanceMatrix` with `getMatrixAt` when an
+> instance is resolved; on the same 500 instances that read agreed with the
+> probe's records on every field. There is no probe, no install ordering and
+> no stale-slot sweep, and `captureInstances` is a deprecated no-op. The
+> record below is kept as the history of why the probe looked necessary.
+
 Records the runtime probe that recovers per-instance provenance for a
 hand-rolled `THREE.InstancedMesh`, replacing hand-maintained
 `userData.instanceSourceRefs` arrays. Addendum to

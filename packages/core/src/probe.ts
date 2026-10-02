@@ -1,13 +1,13 @@
 import { installInstanceProbe } from "./instanceCapture.js";
 
 /**
- * Side-effect entry: importing this installs the instance capture probe.
+ * Former side-effect entry that installed the instance capture probe.
  *
- * Exists as its own entry because installation has to happen before the first
- * scene commits. Instance writes are once-only with no replay, so a probe that
- * arrives after the first mount captures nothing — and does so silently. The
- * Vite plugin injects an import of this module at the top of the application
- * entry; importing it by hand as the first statement of your entry works
- * equally well.
+ * Instance transforms are now read live from `instanceMatrix` when an
+ * instance is resolved, so nothing needs installing and importing this does
+ * nothing. Kept so existing `import "@click-to-source-3d/core/probe"` lines
+ * keep resolving.
+ *
+ * @deprecated Remove the import. This entry is removed in 0.2.0.
  */
 installInstanceProbe();
