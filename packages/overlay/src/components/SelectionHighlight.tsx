@@ -6,8 +6,7 @@ import { RenderPass } from "three/examples/jsm/postprocessing/RenderPass.js";
 import { OutlinePass } from "three/examples/jsm/postprocessing/OutlinePass.js";
 import { OutputPass } from "three/examples/jsm/postprocessing/OutputPass.js";
 import { useOverlayStore } from "../store/overlayStore.js";
-
-declare const process: { env: { NODE_ENV?: string } };
+import { DEV } from "../env.js";
 
 /**
  * Warn once per page, not once per mount. StrictMode mounts effects twice in
@@ -26,21 +25,11 @@ function warnOnce(key: string, message: string): void {
 }
 
 /**
- * True unless a bundler has told us this is a production build.
- *
- * Written as a bare `process.env.NODE_ENV` read because that is the literal
- * every bundler substitutes; routing it through a variable would defeat the
- * substitution. The catch covers an unbundled consumer, where `process` is
- * simply not defined — treated as development, since the only cost is a
- * warning and the alternative is a ReferenceError inside a component.
+ * Outlines the selected object. Renders nothing in a production build.
  */
-const DEV = (() => {
-  try {
-    return process.env.NODE_ENV !== "production";
-  } catch {
-    return true;
-  }
-})();
+export function SelectionHighlight() {
+  return DEV ? <SelectionOutline /> : null;
+}
 
 /**
  * Outlines the selected object.
@@ -60,7 +49,7 @@ const DEV = (() => {
  * invalidate() call below exists for; it was a real silent failure, not a
  * hypothetical.
  */
-export function SelectionHighlight() {
+function SelectionOutline() {
   const { gl, scene, camera, size, invalidate, frameloop } = useThree();
   const selectedObject = useOverlayStore((state) => state.selectedObject);
 

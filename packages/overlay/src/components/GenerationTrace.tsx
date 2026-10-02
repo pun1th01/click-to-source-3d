@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useOverlayStore } from "../store/overlayStore.js";
 import { describeMesh } from "../meshDetails.js";
 import { MeshDetails } from "./MeshDetails.js";
+import { DEV } from "../env.js";
 import {
   editSourceFile,
   SourceEditTransportError,
@@ -45,7 +46,12 @@ function valueFromDraft(originalValue: unknown, draft: string): unknown {
   return draft;
 }
 
+/** The inspection panel. Renders nothing in a production build. */
 export function GenerationTrace() {
+  return DEV ? <GenerationTracePanel /> : null;
+}
+
+function GenerationTracePanel() {
   const {
     selectedObject,
     instanceId,
