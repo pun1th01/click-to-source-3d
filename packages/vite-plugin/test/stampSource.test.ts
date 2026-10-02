@@ -19,7 +19,7 @@ describe("stampSource", () => {
   it("stamps a bare host element", () => {
     const out = stamp("const A = () => <mesh />;");
 
-    expect(out).toContain('__ctsSource: { file: "src/components/Water.jsx"');
+    expect(out).toContain('userData-__ctsSource={{ file: "src/components/Water.jsx"');
     expect(out).toContain('function: "A"');
     expect(out).toContain("line: 1");
   });
@@ -63,8 +63,8 @@ describe("stampSource", () => {
   it("skips React components, which are stamped where they are declared", () => {
     const out = stamp("const A = () => <group><Water /></group>;");
 
-    expect(out).toContain("<group userData=");
-    expect(out).not.toMatch(/<Water userData=/);
+    expect(out).toContain("<group userData-__ctsSource=");
+    expect(out).not.toMatch(/<Water[^>]*userData/);
   });
 
   it("skips geometries and materials", () => {
@@ -72,9 +72,9 @@ describe("stampSource", () => {
       "const A = () => <mesh><planeGeometry /><meshStandardMaterial /></mesh>;"
     );
 
-    expect(out).not.toContain("<planeGeometry userData=");
-    expect(out).not.toContain("<meshStandardMaterial userData=");
-    expect(out).toContain("<mesh userData=");
+    expect(out).not.toMatch(/<planeGeometry[^>]*userData/);
+    expect(out).not.toMatch(/<meshStandardMaterial[^>]*userData/);
+    expect(out).toContain("<mesh userData-__ctsSource=");
   });
 
   it("recovers the function name from every declaration shape", () => {
@@ -88,6 +88,89 @@ describe("stampSource", () => {
     for (const [code, expected] of cases) {
       expect(stamp(code)).toContain(`function: ${expected}`);
     }
+  });
+
+  // Each of these used to stamp `function: "unknown"`.
+  it("names components wrapped in memo or forwardRef", () => {
+    const cases: Array<[string, string]> = [
+      ["const Tree = memo(() => <mesh />);", '"Tree"'],
+      ["const Tree = React.memo(() => <mesh />);", '"Tree"'],
+      ["const Rock = forwardRef((props, ref) => <mesh ref={ref} />);", '"Rock"'],
+      ["const Rock = React.forwardRef(function (p, r) { return <mesh />; });", '"Rock"'],
+      ["const Bush = memo(forwardRef((p, r) => <mesh />));", '"Bush"'],
+    ];
+
+    for (const [code, expected] of cases) {
+      expect(stamp(code), code).toContain(`function: ${expected}`);
+    }
+  });
+
+  it("names an anonymous default export after its file", () => {
+    expect(stamp("export default () => <mesh />;")).toContain(
+      'function: "Water (default export)"'
+    );
+    expect(stamp("export default function () { return <mesh />; }")).toContain(
+      'function: "Water (default export)"'
+    );
+    expect(stamp("export default memo(() => <mesh />);")).toContain(
+      'function: "Water (default export)"'
+    );
+    // Trees/index.tsx is imported as Trees.
+    expect(
+      stamp("export default () => <mesh />;", "/project/src/Trees/index.tsx")
+    ).toContain('function: "Trees (default export)"');
+  });
+
+  // A wrapper is recognised by name, so an ordinary call taking a callback
+  // does not lend its result's variable name to the callback.
+  it("names a .map callback after the component around it", () => {
+    const out = stamp(
+      "function Forest({ trees }) { const nodes = trees.map((t) => <mesh key={t} />); return nodes; }"
+    );
+
+    expect(out).toContain('function: "Forest"');
+    expect(out).not.toContain('function: "nodes"');
+  });
+
+  // react-spring and framer-motion wrap an intrinsic and render it.
+  describe("member-expression elements", () => {
+    it("stamps animated.mesh and motion.group", () => {
+      const out = stamp(
+        "const A = () => <animated.mesh><motion.group /></animated.mesh>;"
+      );
+
+      expect(out).toContain("<animated.mesh userData-__ctsSource=");
+      expect(out).toContain("<motion.group userData-__ctsSource=");
+    });
+
+    it("still skips DOM and components behind a member expression", () => {
+      expect(
+        stampSource("const A = () => <motion.div><Foo.Bar /></motion.div>;", FILE, {
+          root: ROOT,
+        })
+      ).toBeNull();
+    });
+  });
+
+  // The object a <primitive> wraps already has userData — a glTF scene's is
+  // the extras exported from Blender. `userData={...}` replaced it outright.
+  it("adds to a primitive's userData instead of replacing it", () => {
+    const out = stamp("const M = ({ gltf }) => <primitive object={gltf.scene} />;");
+
+    expect(out).toContain("<primitive object={gltf.scene} userData-__ctsSource=");
+    expect(out).not.toMatch(/userData=\{/);
+  });
+
+  // Skipped without a parse: most modules contain no lowercase JSX.
+  it("skips a module with no lowercase JSX without parsing it", () => {
+    expect(
+      stampSource("const A = () => <Water><Rock /></Water>;", FILE, { root: ROOT })
+    ).toBeNull();
+    expect(
+      stampSource("export const id = <T,>(x: T): T => x;", "/project/src/id.tsx", {
+        root: ROOT,
+      })
+    ).toBeNull();
   });
 
   it("records the element's own line, not the component's", () => {
@@ -108,14 +191,16 @@ describe("stampSource", () => {
     it("emits the stamp before a spread, so an author's userData wins", () => {
       const out = stamp("const A = (props) => <mesh {...props} />;");
 
-      expect(out).toContain("<mesh userData={{ __ctsSource:");
-      expect(out.indexOf("userData=")).toBeLessThan(out.indexOf("{...props}"));
+      expect(out).toContain("<mesh userData-__ctsSource={{ file:");
+      expect(out.indexOf("userData-__ctsSource")).toBeLessThan(
+        out.indexOf("{...props}")
+      );
     });
 
     it("goes ahead of the first of several spreads", () => {
       const out = stamp("const A = (a, b) => <mesh {...a} {...b} />;");
 
-      expect(out.indexOf("userData=")).toBeLessThan(out.indexOf("{...a}"));
+      expect(out.indexOf("userData-__ctsSource")).toBeLessThan(out.indexOf("{...a}"));
     });
 
     it("goes ahead of a spread that is not the first attribute", () => {
@@ -123,8 +208,12 @@ describe("stampSource", () => {
         "const A = (props) => <mesh position={[0,0,0]} {...props} scale={2} />;"
       );
 
-      expect(out.indexOf("userData=")).toBeGreaterThan(out.indexOf("position="));
-      expect(out.indexOf("userData=")).toBeLessThan(out.indexOf("{...props}"));
+      expect(out.indexOf("userData-__ctsSource")).toBeGreaterThan(
+        out.indexOf("position=")
+      );
+      expect(out.indexOf("userData-__ctsSource")).toBeLessThan(
+        out.indexOf("{...props}")
+      );
     });
 
     // An explicit userData already outranks any spread before it, so the
@@ -139,12 +228,11 @@ describe("stampSource", () => {
       expect(out.indexOf("{...props}")).toBeLessThan(out.indexOf("userData="));
     });
 
-    // The regression boundary: nothing without a spread changes.
-    it("leaves elements with no spread exactly where they were", () => {
+    it("appends the stamp after every attribute when there is no spread", () => {
       const out = stamp("const A = () => <mesh scale={2} />;");
 
       expect(out).toBe(
-        'const A = () => <mesh scale={2} userData={{ __ctsSource: { file: "src/components/Water.jsx", function: "A", line: 1 } }} />;'
+        'const A = () => <mesh scale={2} userData-__ctsSource={{ file: "src/components/Water.jsx", function: "A", line: 1 }} />;'
       );
     });
   });
@@ -180,7 +268,7 @@ describe("stampSource", () => {
     );
 
     expect(out).toContain('file: "src/Scene.tsx"');
-    expect(out).toContain("__ctsSource:");
+    expect(out).toContain("userData-__ctsSource=");
   });
 });
 
@@ -213,9 +301,9 @@ describe("stampSource — DOM elements", () => {
       { root: ROOT }
     );
 
-    expect(out!.code).toContain("<mesh userData=");
-    expect(out!.code).toContain("<instancedMesh userData=");
-    expect(out!.code).not.toContain("<div userData=");
+    expect(out!.code).toContain("<mesh userData-__ctsSource=");
+    expect(out!.code).toContain("<instancedMesh userData-__ctsSource=");
+    expect(out!.code).not.toMatch(/<div[^>]*userData/);
   });
 
   // R3F applications register their own lowercase elements via extend(), so
@@ -225,6 +313,6 @@ describe("stampSource — DOM elements", () => {
       root: ROOT,
     });
 
-    expect(out!.code).toContain("<waterSurface userData=");
+    expect(out!.code).toContain("<waterSurface userData-__ctsSource=");
   });
 });

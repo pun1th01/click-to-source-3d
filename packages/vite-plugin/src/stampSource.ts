@@ -53,10 +53,78 @@ type Node = {
   [key: string]: unknown;
 };
 
+/**
+ * Calls that wrap a component without renaming it. The function inside
+ * `const Tree = memo(() => <mesh />)` is `Tree` for every purpose a developer
+ * cares about, but its parent is the call, not the declaration.
+ */
+const COMPONENT_WRAPPERS = new Set(["memo", "forwardRef"]);
+
+/**
+ * Any lowercase JSX name, before any other name has been ruled out.
+ *
+ * Cheaper than a parse, and most modules in an application have none: hooks,
+ * stores, utilities, and components that only compose other components. A
+ * member expression counts when its last part is lowercase, so
+ * `<animated.mesh>` is found.
+ */
+const MAY_CONTAIN_HOST_ELEMENT = /<[a-z]|<[\w$]+(?:\.[\w$]+)*\.[a-z]/;
+
 function isHostElement(name: string): boolean {
   // R3F intrinsics are lowercase; uppercase names are React components, whose
   // own JSX is stamped where it is declared rather than where it is used.
   return name.length > 0 && name[0] === name[0].toLowerCase();
+}
+
+/**
+ * The name that decides whether an element is a host element.
+ *
+ * A plain `<mesh>` is its own name. For `<animated.mesh>` or `<motion.mesh>`
+ * it is the last part: react-spring and framer-motion wrap an R3F intrinsic
+ * and render it, and the wrapper's own name says nothing about what it draws.
+ * `<motion.div>` resolves to `div` and is excluded as DOM, the same as a bare
+ * `<div>`.
+ */
+function hostName(name: Node | undefined): string | null {
+  if (name?.type === "JSXIdentifier") {
+    return (name.name as string) || null;
+  }
+
+  if (name?.type === "JSXMemberExpression") {
+    const property = name.property as { name?: string } | undefined;
+    return property?.name ?? null;
+  }
+
+  return null;
+}
+
+function isComponentWrapper(call: Node): boolean {
+  const callee = call.callee as Node | undefined;
+
+  if (callee?.type === "Identifier") {
+    return COMPONENT_WRAPPERS.has(callee.name as string);
+  }
+
+  // React.memo, React.forwardRef
+  if (callee?.type === "MemberExpression" && !callee.computed) {
+    const property = callee.property as { name?: string } | undefined;
+    return COMPONENT_WRAPPERS.has(property?.name ?? "");
+  }
+
+  return false;
+}
+
+/**
+ * What an anonymous default export is called by convention: its file's name,
+ * or its folder's for an index file, since `Trees/index.tsx` is imported as
+ * `Trees`.
+ */
+function defaultExportName(file: string): string {
+  const parts = file.split("/");
+  const base = (parts.pop() ?? "").replace(/\.[^.]+$/, "");
+  const name = base === "index" && parts.length > 0 ? parts.pop()! : base;
+
+  return `${name} (default export)`;
 }
 
 function isStampable(name: string): boolean {
@@ -74,10 +142,12 @@ function isStampable(name: string): boolean {
 /**
  * Name of the nearest enclosing function, walking outward.
  *
- * Handles the four shapes a component is written in: a function declaration, an
- * arrow assigned to a const, an object method, and a default export.
+ * Handles the shapes a component is written in: a function declaration, an
+ * arrow assigned to a const, an object method, a default export, and any of
+ * those wrapped in `memo` or `forwardRef`. A function with no name of its own
+ * — a `.map` callback, say — is skipped in favour of the one around it.
  */
-function enclosingFunctionName(ancestors: Node[]): string {
+function enclosingFunctionName(ancestors: Node[], file: string): string {
   for (let i = ancestors.length - 1; i >= 0; i--) {
     const node = ancestors[i];
 
@@ -98,7 +168,16 @@ function enclosingFunctionName(ancestors: Node[]): string {
         return key.name;
       }
 
-      const parent = ancestors[i - 1];
+      // Step out through wrappers: memo(forwardRef((props, ref) => ...)).
+      let holder = i - 1;
+      while (
+        ancestors[holder]?.type === "CallExpression" &&
+        isComponentWrapper(ancestors[holder])
+      ) {
+        holder--;
+      }
+
+      const parent = ancestors[holder];
       if (parent?.type === "VariableDeclarator") {
         const declId = parent.id as { name?: string } | undefined;
         if (declId?.name) {
@@ -110,6 +189,9 @@ function enclosingFunctionName(ancestors: Node[]): string {
         if (propKey?.name) {
           return propKey.name;
         }
+      }
+      if (parent?.type === "ExportDefaultDeclaration") {
+        return defaultExportName(file);
       }
     }
   }
@@ -144,6 +226,12 @@ export function stampSource(
   filename: string,
   options: StampOptions
 ): { code: string; map: ReturnType<MagicString["generateMap"]> } | null {
+  // Measured at ~8ms to parse a 400-line .tsx that turned out to have nothing
+  // to stamp — paid on every dev-server transform of every such module.
+  if (!MAY_CONTAIN_HOST_ELEMENT.test(code)) {
+    return null;
+  }
+
   const ast = parse(code, {
     sourceType: "module",
     errorRecovery: true,
@@ -187,12 +275,9 @@ export function stampSource(
   };
 
   const stampElement = (element: Node): boolean => {
-    const name = element.name as { type: string; name?: string } | undefined;
+    const name = hostName(element.name as Node | undefined);
 
-    if (!name || name.type !== "JSXIdentifier" || !name.name) {
-      return false;
-    }
-    if (!isStampable(name.name)) {
+    if (!name || !isStampable(name)) {
       return false;
     }
 
@@ -203,8 +288,24 @@ export function stampSource(
 
     const stamp =
       `{ file: ${JSON.stringify(file)}, ` +
-      `function: ${JSON.stringify(enclosingFunctionName(ancestors))}, ` +
+      `function: ${JSON.stringify(enclosingFunctionName(ancestors, file))}, ` +
       `line: ${line} }`;
+
+    // With no explicit userData the stamp is a pierced prop, which R3F
+    // resolves as `object.userData.__ctsSource = stamp`, adding one key to
+    // whatever userData the object already has.
+    //
+    // It used to be `userData={{ __ctsSource }}`, which R3F applies by
+    // replacing userData outright. On an object R3F creates that replaces an
+    // empty object and nothing is lost; on `<primitive object={gltf.scene} />`
+    // it discarded the model's own userData — the extras a glTF carries from
+    // Blender — in dev only, so an app reading them behaved differently in dev
+    // and production.
+    //
+    // An explicit userData attribute keeps the merge below instead. Piercing
+    // after it throws inside R3F when the author's value is null, a string, or
+    // frozen; the merge builds a fresh object and handles all three.
+    const pierced = `userData-__ctsSource={${stamp}}`;
 
     const attributes = (element.attributes ?? []) as Node[];
     const existing = attributes.find(
@@ -232,17 +333,11 @@ export function stampSource(
         // re-evaluation of the spread expression.
         //
         // The trade is real: an element whose spread carries userData loses
-        // its stamp and resolves through the parent walk instead. Keeping
-        // both would mean emitting `{ ...props.userData, __ctsSource }`, which
-        // re-evaluates the spread argument — safe for an identifier, wrong for
-        // `{...getProps()}`.
-        //
-        // Elements with no spread are untouched: same insertion point, same
-        // bytes as before.
-        magic.appendLeft(
-          firstSpread.start as number,
-          `userData={{ __ctsSource: ${stamp} }} `
-        );
+        // its stamp and resolves through the parent walk instead. Piercing
+        // after the spread would keep both, but throws inside R3F when the
+        // spread's userData is null or frozen, and re-evaluating the spread to
+        // merge it is wrong for `{...getProps()}`.
+        magic.appendLeft(firstSpread.start as number, `${pierced} `);
         return true;
       }
 
@@ -253,9 +348,7 @@ export function stampSource(
       const needsSpace = !/\s/.test(code[insertAt - 1] ?? "");
       magic.appendLeft(
         insertAt,
-        `${needsSpace ? " " : ""}userData={{ __ctsSource: ${stamp} }}${
-          element.selfClosing ? " " : ""
-        }`
+        `${needsSpace ? " " : ""}${pierced}${element.selfClosing ? " " : ""}`
       );
       return true;
     }
@@ -286,6 +379,8 @@ export function stampSource(
 
   return {
     code: magic.toString(),
-    map: magic.generateMap({ source: filename, hires: true }),
+    // Mappings at word boundaries rather than at every character: far smaller,
+    // and the resolution stack traces and breakpoints actually use.
+    map: magic.generateMap({ source: filename, hires: "boundary" }),
   };
 }
