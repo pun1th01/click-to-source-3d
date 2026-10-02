@@ -25,9 +25,8 @@ and [`@click-to-source-3d/mcp`](https://www.npmjs.com/package/@click-to-source-3
     export default defineConfig({
       plugins: [
         clickToSource({
-          stampSource: true,      // write source locations into userData
-          captureInstances: true, // per-instance transforms for InstancedMesh
-          bridge: true,           // let an agent query the running scene
+          stampSource: true, // write source locations into userData
+          bridge: true,      // let an agent query the running scene
         }),
         react(),
       ],
@@ -38,7 +37,7 @@ and [`@click-to-source-3d/mcp`](https://www.npmjs.com/package/@click-to-source-3
 | option | default | what it does |
 |---|---|---|
 | `stampSource` | `false` | Stamps `file`/`function`/`line` into `userData.__ctsSource` for each JSX element that becomes an object. Skips DOM and SVG tags, and `*Geometry`/`*Material`. |
-| `captureInstances` | `false` | Injects a probe that records per-instance transforms from `InstancedMesh` writes. Must run before any scene mounts, which is why the plugin injects it rather than asking you to import it. |
+| `captureInstances` | — | **Deprecated, no effect.** Per-instance transforms are now read from the `InstancedMesh` itself when an instance is clicked, with no option. Remove it; it is removed in 0.2.0. |
 | `bridge` | `false` | Opens the scene-bridge endpoints. Also needs `<ClickToSourceBridge />` inside your `Canvas`. |
 | `allowedExtensions` | source types | Which file extensions the editor may read and write. |
 | `allowedOrigins` | dev origins | Origin allowlist for the write endpoint. |

@@ -93,13 +93,19 @@ export async function readSourceFile(
   return payload.content;
 }
 
+/**
+ * Rewrites one argument, as the file stands on disk when the request lands.
+ *
+ * The file's contents are deliberately not read first and sent along. They
+ * used to be, and the server edited that copy and wrote it back — so a save
+ * in the editor between the panel's read and its write was silently undone.
+ */
 export async function editSourceFile(
   sourceRef: SourceRef,
   argName: string,
   newValue: unknown,
   fetchImpl: SourceEditFetch = fetch
 ): Promise<void> {
-  const content = await readSourceFile(sourceRef.file, fetchImpl);
   const request: EditRequest = {
     file: sourceRef.file,
     line: sourceRef.line,
@@ -110,9 +116,5 @@ export async function editSourceFile(
     newValue,
   };
 
-  await postJson(
-    WRITE_FILE_PATH,
-    { ...request, content },
-    fetchImpl
-  );
+  await postJson(WRITE_FILE_PATH, request, fetchImpl);
 }

@@ -17,8 +17,6 @@ import {
 } from "./middleware.js";
 import { stampSource } from "./stampSource.js";
 
-const PROBE_MODULE_ID = "virtual:click-to-source-probe";
-
 const TRAILING_SLASHES = new RegExp("/+$");
 
 /** Reads a JSON body, runs a handler, and writes the JSON result. */
@@ -90,18 +88,15 @@ export type ClickToSourceOptions = {
    */
   stampSource?: boolean | "always";
   /**
-   * Install the instance capture probe, so per-instance args for a
-   * hand-rolled InstancedMesh are recovered from the writes themselves
-   * instead of a hand-maintained instanceSourceRefs array.
+   * Formerly installed a probe that captured per-instance transforms as they
+   * were written.
    *
-   * Injected as a module script ahead of the application entry, because
-   * instance writes are once-only with no replay: a probe that arrives after
-   * the first scene commits captures nothing, and does so silently.
+   * Instance transforms are now read live from the mesh when an instance is
+   * resolved, which needs no probe, patches nothing, and also covers the
+   * `setMatrixAt(i, dummy.matrix)` loop the probe could not see. Every
+   * InstancedMesh gets per-instance provenance with no option set.
    *
-   * Dev only, and not offered for production. The probe patches
-   * InstancedMesh.prototype.setMatrixAt and Matrix4.prototype.clone
-   * process-globally, which every InstancedMesh in the process then pays for,
-   * including drei's Cloud, Sampler, Instances and Outlines.
+   * @deprecated Has no effect. Remove it; the option is removed in 0.2.0.
    */
   captureInstances?: boolean;
   /**
@@ -146,16 +141,18 @@ export function clickToSource(options: ClickToSourceOptions = {}): Plugin {
   };
 
   const stamping = options.stampSource ?? false;
-  const capturing = options.captureInstances ?? false;
   const bridging = options.bridge ?? false;
   const hub = new BridgeHub();
   let warnedAboutOrder = false;
 
   return {
     name: "click-to-source",
-    // Same bucket as the React plugin, which also declares "pre". Vite keeps
-    // user array order within a bucket, so this plugin has to be listed first
-    // for any JSX to still be here when transform runs.
+    // "pre" so the transform runs before Vite's own JSX compilation, which is
+    // where @vitejs/plugin-react's JSX is compiled — so with that plugin,
+    // either array order works. A plugin that compiles JSX in a "pre"
+    // transform of its own would need this one listed ahead of it, since Vite
+    // keeps array order within a bucket; the transform warns if it finds a
+    // .jsx/.tsx file with no JSX left in it.
     enforce: "pre",
     apply(_config, env) {
       // The endpoints are dev-only. The build is entered only to stamp, and
@@ -164,6 +161,14 @@ export function clickToSource(options: ClickToSourceOptions = {}): Plugin {
     },
     configResolved(config) {
       resolvedConfig = config;
+
+      if (options.captureInstances !== undefined) {
+        config.logger.warn(
+          "click-to-source: captureInstances is deprecated and has no effect. " +
+            "Instance transforms are now read live, for every InstancedMesh, " +
+            "with no option. Remove it from clickToSource()."
+        );
+      }
     },
     transform(code, id) {
       if (!stamping) {
@@ -177,58 +182,23 @@ export function clickToSource(options: ClickToSourceOptions = {}): Plugin {
       }
 
       if (!warnedAboutOrder && !code.includes("<")) {
-        // A .jsx file with no JSX left in it means something transformed it
-        // first — almost always the React plugin listed ahead of this one.
-        // Silently stamping nothing is the worst outcome, so say so once.
+        // A .jsx file with no JSX left in it means something compiled it
+        // first. @vitejs/plugin-react does not — Vite's own compilation runs
+        // after this transform — but a plugin that compiles JSX itself in a
+        // "pre" transform does. Silently stamping nothing is the worst
+        // outcome, so say so once.
         warnedAboutOrder = true;
         this.warn(
           "click-to-source: no JSX found in " +
             id +
-            ". List clickToSource() before the React plugin in your Vite " +
-            "config, or source stamping will do nothing."
+            ". Another plugin compiled it before click-to-source ran; list " +
+            "clickToSource() first in your Vite plugins, or source stamping " +
+            "will do nothing."
         );
         return null;
       }
 
       return stampSource(code, id.split("?")[0], { root: resolvedConfig.root });
-    },
-    transformIndexHtml: {
-      order: "pre",
-      handler(_html, ctx) {
-        // Dev only: in a build there is no overlay to read the records, and
-        // the patch would be shipped to every visitor.
-        if (!capturing || !ctx.server) {
-          return;
-        }
-
-        // A module script ahead of the application entry. Module scripts run
-        // in document order, so the probe is live before any scene mounts —
-        // the one thing this mechanism cannot recover from getting wrong,
-        // since instance writes are once-only with no replay.
-        //
-        // It points at a virtual module this plugin serves rather than at the
-        // package directly. A bare specifier is not resolvable from an HTML
-        // src, and hard-coding a path would put the probe in a different
-        // module graph from the application, where its patches would apply to
-        // a different copy of three.
-        return [
-          {
-            tag: "script",
-            attrs: { type: "module", src: `/@id/__x00__${PROBE_MODULE_ID}` },
-            injectTo: "head-prepend" as const,
-          },
-        ];
-      },
-    },
-
-    resolveId(id) {
-      return id === PROBE_MODULE_ID ? `\0${PROBE_MODULE_ID}` : null;
-    },
-
-    load(id) {
-      return id === `\0${PROBE_MODULE_ID}`
-        ? 'import "@click-to-source-3d/core/probe";'
-        : null;
     },
 
     configureServer(server) {
@@ -332,13 +302,21 @@ export function clickToSource(options: ClickToSourceOptions = {}): Plugin {
           return;
         }
 
+        // Vite's own serving boundary, so a component from a sibling
+        // workspace package is as editable as it is loadable.
+        const fileOptions = (): FileRequestOptions => ({
+          ...requestOptions,
+          allowedOrigins: serverOrigins(),
+          allowedRoots: resolvedConfig.server.fs.allow,
+        });
+
         if (pathname === READ_FILE_PATH) {
           void handleFileRequest(
             request,
             response,
             resolvedConfig.root,
             "read",
-            { ...requestOptions, allowedOrigins: serverOrigins() }
+            fileOptions()
           );
           return;
         }
@@ -349,7 +327,7 @@ export function clickToSource(options: ClickToSourceOptions = {}): Plugin {
             response,
             resolvedConfig.root,
             "write",
-            { ...requestOptions, allowedOrigins: serverOrigins() }
+            fileOptions()
           );
           return;
         }

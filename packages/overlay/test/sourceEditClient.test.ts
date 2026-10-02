@@ -11,15 +11,14 @@ function jsonResponse(body: unknown, status = 200) {
 }
 
 describe("source edit client", () => {
-  it("reads through Step 6 before sending the selected SourceRef edit", async () => {
+  // One request, and no file contents in it. The panel used to read the file
+  // and send it back with the edit, and the server edited that copy — so a
+  // save made in the editor in between was silently undone.
+  it("sends only the edit, with no read and no file contents", async () => {
     const calls: Array<{ input: string; body: Record<string, unknown> }> = [];
     const fetchImpl: SourceEditFetch = async (input, init) => {
       const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
       calls.push({ input, body });
-
-      if (input === "/__cts/read-file") {
-        return jsonResponse({ content: '<mesh color="hotpink" />' });
-      }
 
       return jsonResponse({ success: true });
     };
@@ -38,17 +37,12 @@ describe("source edit client", () => {
 
     expect(calls).toEqual([
       {
-        input: "/__cts/read-file",
-        body: { file: "src/main.tsx" },
-      },
-      {
         input: "/__cts/write-file",
         body: {
           file: "src/main.tsx",
           line: 77,
           argName: "color",
           newValue: "rebeccapurple",
-          content: '<mesh color="hotpink" />',
         },
       },
     ]);
@@ -59,10 +53,6 @@ describe("source edit client", () => {
     const fetchImpl: SourceEditFetch = async (input, init) => {
       const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
       calls.push({ input, body });
-
-      if (input === "/__cts/read-file") {
-        return jsonResponse({ content: "const WATER_LEVEL = -13" });
-      }
 
       return jsonResponse({ success: true });
     };
@@ -90,10 +80,6 @@ describe("source edit client", () => {
     const fetchImpl: SourceEditFetch = async (input, init) => {
       const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
       calls.push({ input, body });
-
-      if (input === "/__cts/read-file") {
-        return jsonResponse({ content: "const noiseFloor = -30" });
-      }
 
       return jsonResponse({ success: true });
     };

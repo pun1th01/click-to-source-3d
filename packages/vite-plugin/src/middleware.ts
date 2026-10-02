@@ -8,18 +8,12 @@ type ReadFileRequest = {
   file: string;
 };
 
-type WriteFileRequest = {
-  file: string;
-  content: string;
-};
-
 type EditWriteFileRequest = {
   file: string;
-  content?: string;
   edit: EditRequest;
 };
 
-type FileRequest = ReadFileRequest | WriteFileRequest | EditWriteFileRequest;
+type FileRequest = ReadFileRequest | EditWriteFileRequest;
 
 type FileSystemError = NodeJS.ErrnoException;
 
@@ -49,6 +43,17 @@ export type FileRequestOptions = {
    * set. See isLoopbackRemote for why the default is closed.
    */
   allowRemote?: boolean;
+  /**
+   * Directories a requested file may resolve into besides the root, which is
+   * always allowed. Paths are still interpreted relative to the root.
+   *
+   * The plugin passes Vite's resolved `server.fs.allow` — by default the
+   * workspace root — which is the boundary Vite already serves source from.
+   * In a monorepo, a component in `packages/ui` is stamped with a path like
+   * `../../packages/ui/src/Rock.tsx`, and with the root as the only boundary
+   * every such file was refused: the panel named it and could not edit it.
+   */
+  allowedRoots?: readonly string[];
 };
 
 /**
@@ -219,38 +224,35 @@ function parseRequestBody(
   }
 
   if (operation === "write") {
-    const hasEditFields =
-      hasOwn(body, "line") || hasOwn(body, "argName") || hasOwn(body, "newValue");
-
-    if (hasEditFields) {
-      if (
-        !Number.isInteger(body.line) ||
-        (body.line as number) < 1 ||
-        typeof body.argName !== "string" ||
-        body.argName.length === 0 ||
-        !hasOwn(body, "newValue") ||
-        (hasOwn(body, "content") && typeof body.content !== "string")
-      ) {
-        throw new Error("invalid request body");
-      }
-
-      return {
-        file: body.file,
-        content: typeof body.content === "string" ? body.content : undefined,
-        edit: {
-          file: body.file,
-          line: body.line as number,
-          argName: body.argName,
-          newValue: body.newValue,
-        },
-      };
-    }
-
-    if (typeof body.content !== "string") {
+    // A write is an edit of one literal, and nothing else.
+    //
+    // This endpoint used to also accept `{ file, content }` and write the
+    // content verbatim — a whole-file overwrite of any allowed source file
+    // under the root. Neither client ever sent that, and an edit could carry
+    // `content` too, which was edited in place of the file on disk: the same
+    // overwrite, one step removed, and a lost update whenever the file
+    // changed between the caller's read and its write. `content` is now
+    // ignored rather than refused, so a 0.1.3 overlay that still sends it
+    // keeps working, and every edit applies to the file as it is on disk.
+    if (
+      !Number.isInteger(body.line) ||
+      (body.line as number) < 1 ||
+      typeof body.argName !== "string" ||
+      body.argName.length === 0 ||
+      !hasOwn(body, "newValue")
+    ) {
       throw new Error("invalid request body");
     }
 
-    return { file: body.file, content: body.content };
+    return {
+      file: body.file,
+      edit: {
+        file: body.file,
+        line: body.line as number,
+        argName: body.argName,
+        newValue: body.newValue,
+      },
+    };
   }
 
   return { file: body.file };
@@ -271,7 +273,11 @@ function isInsideRoot(root: string, candidate: string): boolean {
   );
 }
 
-function resolveLexicalPath(root: string, requestedFile: string): string | null {
+function resolveLexicalPath(
+  root: string,
+  requestedFile: string,
+  allowedRoots: readonly string[]
+): string | null {
   if (
     requestedFile.includes("\0") ||
     path.isAbsolute(requestedFile) ||
@@ -283,23 +289,39 @@ function resolveLexicalPath(root: string, requestedFile: string): string | null 
   // Treat both slash styles as separators so Windows traversal attempts are
   // rejected consistently even if the server is later run on another OS.
   const normalizedFile = requestedFile.replace(/[\\/]+/g, path.sep);
-  const resolvedRoot = path.resolve(root);
-  const resolvedFile = path.resolve(resolvedRoot, normalizedFile);
+  const resolvedFile = path.resolve(path.resolve(root), normalizedFile);
 
-  return isInsideRoot(resolvedRoot, resolvedFile) ? resolvedFile : null;
+  return allowedRoots.some((allowed) =>
+    isInsideRoot(path.resolve(allowed), resolvedFile)
+  )
+    ? resolvedFile
+    : null;
+}
+
+async function realpathOrNull(target: string): Promise<string | null> {
+  try {
+    return await fs.realpath(target);
+  } catch {
+    return null;
+  }
 }
 
 async function resolveSafePath(
   root: string,
-  requestedFile: string
+  requestedFile: string,
+  allowedRoots: readonly string[]
 ): Promise<string | null> {
-  const lexicalPath = resolveLexicalPath(root, requestedFile);
+  const lexicalPath = resolveLexicalPath(root, requestedFile, allowedRoots);
 
   if (!lexicalPath) {
     return null;
   }
 
-  const resolvedRoot = await fs.realpath(root);
+  // An allowed root that does not exist admits nothing, rather than failing
+  // every request.
+  const realRoots = (await Promise.all(allowedRoots.map(realpathOrNull))).filter(
+    (entry): entry is string => entry !== null
+  );
   let existingPath = lexicalPath;
   const missingPathParts: string[] = [];
 
@@ -311,7 +333,9 @@ async function resolveSafePath(
         ...missingPathParts.reverse()
       );
 
-      return isInsideRoot(resolvedRoot, realCandidate) ? lexicalPath : null;
+      return realRoots.some((realRoot) => isInsideRoot(realRoot, realCandidate))
+        ? lexicalPath
+        : null;
     } catch (error) {
       const fileSystemError = error as FileSystemError;
 
@@ -369,7 +393,10 @@ export async function handleFileRequest(
   let filePath: string | null;
 
   try {
-    filePath = await resolveSafePath(root, parsedRequest.file);
+    filePath = await resolveSafePath(root, parsedRequest.file, [
+      root,
+      ...(options.allowedRoots ?? []),
+    ]);
   } catch {
     sendJson(response, 500, { error: "Filesystem failure" });
     return;
@@ -394,39 +421,32 @@ export async function handleFileRequest(
       return;
     }
 
-    const writeRequest = parsedRequest as WriteFileRequest | EditWriteFileRequest;
-    let content = writeRequest.content;
+    const { edit } = parsedRequest as EditWriteFileRequest;
+    const source = await fs.readFile(filePath, "utf8");
+    let content: string;
 
-    if ("edit" in writeRequest) {
-      const source = content ?? (await fs.readFile(filePath, "utf8"));
-
-      try {
-        content = editSource(source, writeRequest.edit);
-      } catch (error) {
-        if (error instanceof SourceEditError) {
-          // The editor's message, not a generic stand-in for it. Both clients
-          // read `error` as the human-readable half, so replacing the constant
-          // here is what carries "declared at line 2" to the panel and to an
-          // agent; sending it under a new key would have reached neither
-          // without changing them too. `code` is unchanged and still the field
-          // to branch on.
-          sendJson(response, 400, {
-            error: error.message,
-            code: error.code,
-          });
-          return;
-        }
-
-        sendJson(response, 500, { error: "Source edit failure" });
+    try {
+      content = editSource(source, edit);
+    } catch (error) {
+      if (error instanceof SourceEditError) {
+        // The editor's message, not a generic stand-in for it. Both clients
+        // read `error` as the human-readable half, so replacing the constant
+        // here is what carries "declared at line 2" to the panel and to an
+        // agent; sending it under a new key would have reached neither
+        // without changing them too. `code` is unchanged and still the field
+        // to branch on.
+        sendJson(response, 400, {
+          error: error.message,
+          code: error.code,
+        });
         return;
       }
+
+      sendJson(response, 500, { error: "Source edit failure" });
+      return;
     }
 
-    await fs.writeFile(
-      filePath,
-      content as string,
-      "utf8"
-    );
+    await fs.writeFile(filePath, content, "utf8");
     sendJson(response, 200, { success: true });
   } catch (error) {
     const fileSystemError = error as FileSystemError;

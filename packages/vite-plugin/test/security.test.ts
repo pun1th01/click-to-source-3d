@@ -46,7 +46,15 @@ beforeAll(async () => {
     logLevel: "silent",
     root: pluginRoot,
     plugins: [clickToSource()],
-    server: { host: "127.0.0.1", port: 0, strictPort: true },
+    // The root alone, so these tests exercise the root as the boundary. By
+    // default Vite allows the whole workspace, which here is this repository;
+    // the monorepo case has its own test in plugin.test.ts.
+    server: {
+      host: "127.0.0.1",
+      port: 0,
+      strictPort: true,
+      fs: { allow: [pluginRoot] },
+    },
   });
 
   await server.listen();
@@ -131,7 +139,9 @@ describe("extension allowlist", () => {
   it("rejects writes to a disallowed extension, not just reads", async () => {
     const result = await post(WRITE_FILE_PATH, {
       file: ".env",
-      content: "STOLEN=1\n",
+      line: 1,
+      argName: "STOLEN",
+      newValue: 1,
     });
 
     expect(result.status).toBe(400);
@@ -177,7 +187,7 @@ describe("origin check", () => {
   it("rejects a cross-origin write before it can touch the filesystem", async () => {
     const result = await post(
       WRITE_FILE_PATH,
-      { file: "src/index.ts", content: "clobbered" },
+      { file: "src/index.ts", line: 1, argName: "x", newValue: 1 },
       { Origin: "http://evil.example" }
     );
 
