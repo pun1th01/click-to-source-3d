@@ -44,8 +44,9 @@ the literal in your source and Vite hot-reloads.*
 
 ## Current Status
 
-**Stage 7 — release.** Five packages at `0.1.3`, versioned in lockstep and
+**Stage 7 — release.** Five packages at `0.1.4`, versioned in lockstep and
 verified by installing all five into a consumer outside this repository.
+What changed in each release is in [`CHANGELOG.md`](CHANGELOG.md).
 
 `0.1.x` is deliberate rather than modest: instanced provenance is read-only,
 scene addresses cannot detect a world regeneration, and the public API surface
@@ -60,7 +61,7 @@ with the commit of the dogfooding consumer it was verified against.
 | package | what it is |
 |---|---|
 | `@click-to-source-3d/shared` | The `SourceRef` contract and protocol constants. Types, no runtime. |
-| `@click-to-source-3d/core` | Provenance resolution and per-instance capture. Browser-pure. |
+| `@click-to-source-3d/core` | Provenance resolution, down to the single instance of an `InstancedMesh`. Browser-pure. |
 | `@click-to-source-3d/overlay` | React Three Fiber components: selection, the trace panel, the bridge. |
 | `@click-to-source-3d/vite-plugin` | Dev-server endpoints, JSX source stamping, the scene bridge. |
 | `@click-to-source-3d/mcp` | An MCP server exposing the same provenance to coding agents. |
@@ -69,18 +70,24 @@ with the commit of the dogfooding consumer it was verified against.
 
 Source stamping is a JSX transform, the overlay is React, the bridge component
 needs the R3F tree, and the dev-server half needs Vite. Plain Three.js can use
-`@click-to-source-3d/core` with hand-written `userData.sourceRef`, but the
-experience this project is about is R3F.
+`@click-to-source-3d/core` with hand-written `userData.sourceRef` today.
+Automatic, untagged support for plain Three.js is planned for `0.2.0`; see the
+[Roadmap](#roadmap).
 
 ## What it costs to adopt
 
 Two installs bring four packages, and four things go into your app: the plugin,
-a pointer handler — the only one of the four that is not a component — one
+a click handler — the only one of the four that is not a component — one
 component inside the `Canvas` and one outside it. The `Canvas` also takes an
 `onPointerMissed` prop, which is what clears the selection on an empty click.
 `<ClickToSourceBridge />` is a fifth, needed only for the agent tools in
 `@click-to-source-3d/mcp`; the example below includes it. Every feature is
-opt-in and dev-only. The next section is the working code.
+opt-in and dev-only: the plugin does nothing in a build, and the components
+render nothing in production. The next section is the working code.
+
+That is more wiring than a dev tool should ask for. `0.1.5` is planned to
+replace all of it with one command and no changes to your app code; see the
+[Roadmap](#roadmap).
 
 ## Getting Started
 
@@ -262,6 +269,22 @@ that it changed.
 | 6 | MCP / agent mode | done — `stage6-complete` |
 | 6.5 | Auto-instrumentation | done — shipped as `stampSource`, no longer optional or research |
 | 7 | Ship | done — first release was `0.1.0`, not 1.0 |
+| 8 | One-command setup for R3F | next — `0.1.5` |
+| 9 | Plain Three.js, untagged | planned — `0.2.0` |
+
+**Stage 8** makes the tool work as soon as it is installed. An
+`npx click-to-source-3d init` command adds the plugin to your Vite config; the
+plugin then injects the inspector itself, with a toggleable inspect mode, so
+there are no components to mount and no handler to write. It also detects which
+values on an element are editable, which replaces hand-written `sourceRef`
+metadata.
+
+**Stage 9** brings the same experience to plain Three.js, with nothing tagged
+by hand. Click a mesh and see the line that created it, the chain of
+generator calls that led there with the values they were called with, and the
+functions they used, such as a noise function. A prototype of the transform
+behind it already works on untagged code. `0.2.0` will be the first version to
+support both Three.js and React Three Fiber.
 
 The 1.0 in the original plan was optimistic. This released at `0.1.0`: the API
 surface has only just been curated deliberately, instanced provenance is

@@ -2,6 +2,137 @@
 
 All five packages are versioned in lockstep.
 
+## 0.1.4
+
+Bug fixes in four of the five packages; `shared` moves with them by
+convention. Upgrade if you use `InstancedMesh`, edit values from the panel,
+load models with `<primitive>`, or work in a monorepo.
+
+### Upgrading
+
+Nothing breaks, but four things are worth doing:
+
+- Remove `captureInstances` from `clickToSource()`. It now does nothing and
+  warns once.
+- Remove any `import "@click-to-source-3d/core/probe"`. It now does nothing.
+- If your click handler is on `onPointerUp`, move it to `onClick` and return
+  early when `e.delta > 2`. The README shows the new handler.
+- If anything of yours posted `{ file, content }` to `/__cts/write-file`, it
+  is now refused. Neither the panel nor the MCP server ever sent it.
+
+### Fixed — `@click-to-source-3d/core`
+
+**Instances placed the way the three.js docs teach now resolve.** The capture
+probe paired each `setMatrixAt` write with an earlier `Matrix4.clone()`, so
+`mesh.setMatrixAt(i, dummy.matrix)` — one shared matrix, every iteration —
+captured 0 of 500 instances, with no warning. The transform is now read from
+the mesh's `instanceMatrix` when an instance is resolved. On the same 500
+instances that read agreed with the probe's records on every field. It also
+covers matrices written straight into the buffer, needs nothing installed
+before the scene mounts, and patches no prototypes.
+
+`captureInstances` is now a deprecated no-op that warns once, and
+`@click-to-source-3d/core/probe`, `installInstanceProbe` and `getProbeStats`
+are kept only so existing code keeps compiling. All are removed in 0.2.0.
+`instance_not_recorded` now has one cause, `instance_out_of_range`; the
+probe-specific causes can no longer occur.
+
+### Fixed — `@click-to-source-3d/vite-plugin`
+
+**Save no longer rewrites the wrong literal.** Literals inside a hand-written
+`sourceRef` were edit candidates. Write `args: { radius: 0.6 }` next to
+`<sphereGeometry args={[0.6, 32, 32]} />` and Save rewrote the copy in the
+metadata, reported success, and the sphere did not change. Anything under
+`sourceRef` or `instanceSourceRefs` is now ignored, so that edit fails with
+`ARGUMENT_NOT_FOUND` instead of changing the wrong value.
+
+**A `<primitive>`'s own userData survives stamping.** The stamp was
+`userData={{ __ctsSource }}`, which R3F applies by replacing userData. On
+`<primitive object={gltf.scene} />` that discarded the model's glTF extras in
+dev only, so an app reading them behaved differently in dev and production.
+Elements without an explicit `userData` are now stamped with the pierced
+prop `userData-__ctsSource`, which adds one key. An explicit `userData`
+attribute still gets the merge, because piercing after it throws inside R3F
+when the value is `null`, a string or frozen.
+
+**A spread's userData no longer loses to the stamp.** The stamp was appended
+after every attribute, so in `<mesh {...props} />` where `props` carries
+userData, that userData was replaced outright, hand-written `sourceRef` and
+all. Whether a spread carries userData is a runtime value, so the stamp is
+now emitted before the first spread: a spread with userData wins, as manual
+outranks stamped everywhere else, and one without it leaves the stamp alone.
+
+**Components wrapped in `memo` or `forwardRef` are named.** They, and
+anonymous default exports, were stamped `function: "unknown"`. Default
+exports are named after their file (`Trees (default export)`, or the folder
+for an `index` file).
+
+**`<animated.mesh>` and `<motion.group>` are stamped.** Member-expression
+elements whose last part is an R3F intrinsic were skipped entirely.
+
+**Files in sibling workspace packages can be read and edited.** Paths were
+contained to the Vite root, so in a monorepo a component stamped as
+`../../packages/ui/src/Rock.tsx` was named by the panel and refused by the
+endpoint. Containment now uses Vite's resolved `server.fs.allow`, which is
+where Vite already serves source from.
+
+### Security — `@click-to-source-3d/vite-plugin`
+
+**The write endpoint accepts edits only.** It also accepted
+`{ file, content }` and wrote the content verbatim, a whole-file overwrite of
+any allowed source file that no client used. An edit could also carry
+`content`, which was edited instead of the file on disk. That was the same
+overwrite one step removed, and a lost update whenever the file changed
+between the panel's read and its write. Whole-file writes are now refused. A
+`content` field on an edit is ignored rather than refused, so a 0.1.3
+overlay keeps working. Every edit applies to the file as it is on disk.
+
+### Fixed — `@click-to-source-3d/overlay`
+
+**The components do nothing in a production build.** Mounted
+unconditionally, they shipped a live panel and a render-loop takeover. The
+bridge also opened an `EventSource` to a dev-only endpoint, which the browser
+retries indefinitely. Each now renders nothing when
+`NODE_ENV === "production"`.
+
+**`<SelectionHighlight />` no longer costs the app its antialiasing while
+nothing is selected.** It rendered every frame through an `EffectComposer`
+whose render target has no multisampling, so mounting it turned antialiasing
+off for the whole application. With nothing selected it now makes the same
+`gl.render(scene, camera)` call R3F would, so an unselected frame is the same
+as one without the component. While something is selected, antialiasing is
+still off; a multisampled target costs several hundred megabytes at retina
+resolution.
+
+**The panel no longer reads the file before each save.** It sends the edit
+alone; see the write endpoint above.
+
+**The documented click handler no longer selects on an orbit drag.** It used
+`onPointerUp`, where R3F reports no pointer travel, so releasing a drag over
+a mesh selected it. The README and example now use `onClick` and ignore
+`e.delta > 2`.
+
+### Fixed — `@click-to-source-3d/mcp`
+
+The server reports its version from its own `package.json`, rather than a
+literal that release bumps have to remember.
+
+### Changed
+
+- `vite-plugin` skips the Babel parse for modules with no lowercase JSX,
+  measured at ~8 ms per 400-line module. Its sourcemaps use word-boundary
+  resolution.
+- `engines` is now `node >=20.19.0`, which Vite 7 and 8 require. CI runs
+  Node 22 and 24.
+
+### Repository
+
+- `CONTRIBUTING.md` exists; the README linked to it, and to a code of
+  conduct, that did not. The README now points at the Contributor Covenant.
+- The example sets `"type": "module"`, which silences Vite's warning on every
+  build. It also places its trees with the shared `dummy.matrix` loop, so the
+  demo exercises the fixed path.
+
 ## 0.1.3
 
 Only `mcp` and `vite-plugin` change behaviour; the other three move with
