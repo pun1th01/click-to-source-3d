@@ -104,9 +104,8 @@ import { clickToSource } from '@click-to-source-3d/vite-plugin';
 export default defineConfig({
   plugins: [
     clickToSource({
-      stampSource: true,      // stamp file/function/line into userData
-      captureInstances: true, // per-instance transforms for InstancedMesh
-      bridge: true,           // let an agent query the running scene
+      stampSource: true, // stamp file/function/line into userData
+      bridge: true,      // let an agent query the running scene
     }),
     react(),
   ],
@@ -121,7 +120,9 @@ runs. If stamping ever produces nothing, the plugin says so and names the fix.
 ### 3. The JSX
 
 Two components go inside the `Canvas`, one goes outside it, and a `<group>`
-carries the pointer handler.
+carries the click handler. Use `onClick`, not `onPointerUp`: R3F measures how
+far the pointer moved only for click events, and without that check a drag to
+orbit the camera that ends over a mesh selects it.
 
 ```jsx
 import { Canvas } from '@react-three/fiber';
@@ -136,7 +137,8 @@ import {
 function Scene() {
   const resolveClick = useClickToSource();
 
-  const handlePointerUp = (e) => {
+  const handleClick = (e) => {
+    if (e.delta > 2) return; // a drag that ended over a mesh, not a click
     e.stopPropagation();
     const resolved = resolveClick(e);
     if (resolved) {
@@ -149,7 +151,7 @@ function Scene() {
   return (
     <>
       <SelectionHighlight />
-      <group onPointerUp={handlePointerUp}>
+      <group onClick={handleClick}>
         {/* your scene */}
       </group>
     </>
@@ -210,8 +212,8 @@ function InstancedTreeMesh({ geometry, material, matrices }) {
 }
 ```
 
-This is also the write the capture probe observes, so the same `setMatrixAt`
-loop that places your instances is what gives them per-instance provenance.
+Per-instance provenance needs nothing else. When you click an instance, its
+transform is read from the mesh itself, however the matrices were written.
 
 ### 5. If you use `frameloop="demand"`
 
@@ -232,13 +234,11 @@ priority: whichever renders last wins and the other's output is discarded.
 whatever placed it, usually a seeded RNG, so there is no literal in your source
 to rewrite. The panel shows the values and refuses to edit them.
 
-**Variant-class values cannot be recovered.** Automatic capture reads a
-`Matrix4`, so it recovers `x`, `y`, `z`, `scale` and `yaw` — and nothing else.
-Which colour group, species or material variant an instance belongs to is not
-in the transform. Capture recovers *placement*, not *classification*. Those
-values used to exist, in the hand-maintained `instanceSourceRefs` arrays that
-automatic capture replaced; that is a real trade, not an oversight. Keep
-writing them by hand if you need the classification.
+**Variant-class values cannot be recovered.** An instance's transform holds
+`x`, `y`, `z`, `scale` and `yaw` — and nothing else. Which colour group,
+species or material variant an instance belongs to is not in it. The transform
+gives *placement*, not *classification*. Keep writing `instanceSourceRefs`
+arrays by hand if you need the classification.
 
 **Selection highlighting is mesh-wide for instanced meshes.** Clicking one
 instance outlines every instance in that `InstancedMesh`. Resolution is
@@ -328,7 +328,8 @@ Detailed project documentation is available in the [`docs/`](docs/) directory:
 
 ## Contributing
 
-Contributions are welcome! Please read our [Contributing Guidelines](CONTRIBUTING.md) and our [Code of Conduct](CODE_OF_CONDUCT.md).
+Contributions are welcome! Please read the [Contributing Guidelines](CONTRIBUTING.md).
+Participants are expected to follow the [Contributor Covenant](https://www.contributor-covenant.org/version/2/1/code_of_conduct/).
 If you are opening an issue, please use the provided [Issue Templates](.github/ISSUE_TEMPLATE/).
 
 ## License

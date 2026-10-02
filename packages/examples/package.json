@@ -4,6 +4,7 @@
   "private": true,
   "description": "Example projects and demos for Click-to-Source 3D",
   "license": "MIT",
+  "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "vite build"

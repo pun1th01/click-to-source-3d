@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef } from "react";
+import React, { useEffect, useRef } from "react";
 import { createRoot } from "react-dom/client";
 import * as THREE from "three";
 import { Canvas, ThreeEvent, useFrame, useThree } from "@react-three/fiber";
@@ -41,49 +41,39 @@ function mulberry32(seed: number) {
 /**
  * One InstancedMesh, many trees, each with its own provenance.
  *
- * There is no object per instance for the resolver to read, so the transforms
- * are recovered by the capture probe the plugin installs under
- * `captureInstances: true`. Two things this component does are load-bearing
- * for that, and both fail silently if you skip them:
+ * Placed the way the three.js docs place instances: one shared dummy, its
+ * matrix handed straight to setMatrixAt on every iteration. There is no
+ * object per instance for the resolver to read, so clicking a tree reads that
+ * instance's transform back out of the mesh.
  *
- * 1. `setMatrixAt` is handed a *clone*. The probe pairs a transform to a slot
- *    by the identity of the Matrix4 that `clone()` returned, so the common
- *    `dummy.updateMatrix(); mesh.setMatrixAt(i, dummy.matrix)` — passing the
- *    same object every iteration — records nothing at all.
- *
- * 2. The bounding volumes are recomputed afterwards. A raycast tests an
- *    instanced mesh's bounds before its instances, and a mesh built before
- *    its matrices were written has bounds that do not cover them: clicks miss
- *    entirely and the trees look like they have no provenance.
+ * The bounding volumes are recomputed afterwards, and that part is
+ * load-bearing. A raycast tests an instanced mesh's bounds before its
+ * instances, and a mesh built before its matrices were written has bounds
+ * that do not cover them: clicks miss entirely and the trees look like they
+ * have no provenance.
  */
 function InstancedTrees() {
   const meshRef = useRef<THREE.InstancedMesh>(null);
-
-  const matrices = useMemo(() => {
-    const random = mulberry32(1337);
-    const dummy = new THREE.Object3D();
-
-    return Array.from({ length: TREE_COUNT }, () => {
-      dummy.position.set(random() * 40 - 20, 0, random() * 40 - 20);
-      dummy.rotation.set(0, random() * Math.PI * 2, 0);
-      dummy.scale.setScalar(0.6 + random() * 0.9);
-      dummy.updateMatrix();
-
-      // The clone is what the probe keys on. Passing dummy.matrix directly
-      // would render identically and capture nothing.
-      return dummy.matrix.clone();
-    });
-  }, []);
 
   useEffect(() => {
     const mesh = meshRef.current;
     if (!mesh) return;
 
-    matrices.forEach((matrix, i) => mesh.setMatrixAt(i, matrix));
+    const random = mulberry32(1337);
+    const dummy = new THREE.Object3D();
+
+    for (let i = 0; i < TREE_COUNT; i++) {
+      dummy.position.set(random() * 40 - 20, 0, random() * 40 - 20);
+      dummy.rotation.set(0, random() * Math.PI * 2, 0);
+      dummy.scale.setScalar(0.6 + random() * 0.9);
+      dummy.updateMatrix();
+      mesh.setMatrixAt(i, dummy.matrix);
+    }
+
     mesh.instanceMatrix.needsUpdate = true;
     mesh.computeBoundingBox();
     mesh.computeBoundingSphere();
-  }, [matrices]);
+  }, []);
 
   return (
     <instancedMesh
@@ -100,7 +90,11 @@ function InstancedTrees() {
 function Scene() {
   const resolveClick = useClickToSource();
 
-  const handlePointerUp = (event: ThreeEvent<PointerEvent>) => {
+  // onClick rather than onPointerUp: R3F measures pointer travel only for
+  // click events, so this is the only place a drag to orbit the camera can be
+  // told apart from a pick.
+  const handleClick = (event: ThreeEvent<MouseEvent>) => {
+    if (event.delta > 2) return;
     event.stopPropagation();
     const resolved = resolveClick(event);
 
@@ -119,7 +113,7 @@ function Scene() {
       <ambientLight intensity={Math.PI / 3} />
       <directionalLight position={[10, 20, 8]} intensity={2} />
 
-      <group onPointerUp={handlePointerUp}>
+      <group onClick={handleClick}>
         <InstancedTrees />
 
         {/* Ground. Stamped automatically — click it and the panel names this

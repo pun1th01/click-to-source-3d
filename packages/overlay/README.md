@@ -30,13 +30,17 @@ Five things go into your app.
 **1. The plugin**, conventionally listed before `react()`:
 
     // vite.config.js
-    plugins: [clickToSource({ stampSource: true, captureInstances: true }), react()]
+    plugins: [clickToSource({ stampSource: true }), react()]
 
-**2. Resolve a click** and put the result in the store:
+**2. Resolve a click** and put the result in the store. Attach it as
+`onClick`, not `onPointerUp`: R3F measures how far the pointer moved only for
+click events, and without that a drag to orbit the camera that ends over a mesh
+selects it.
 
     const resolveClick = useClickToSource();
 
-    const handlePointerUp = (e) => {
+    const handleClick = (e) => {
+      if (e.delta > 2) return; // a drag that ended over a mesh, not a click
       e.stopPropagation();
       const resolved = resolveClick(e);
       resolved
@@ -59,12 +63,11 @@ to query the live scene.
 whatever placed it — usually a seeded RNG — so there is no literal in your
 source to rewrite. The panel shows the values and refuses to edit them.
 
-**Variant-class values cannot be recovered.** Automatic capture reads a
-`Matrix4`, so it recovers `x`, `y`, `z`, `scale` and `yaw` and nothing else.
-Which colour group, species or material variant an instance belongs to is not
-in the transform and is gone. Capture recovers *placement*, not
-*classification*. If you need the classification, keep writing
-`userData.instanceSourceRefs` by hand.
+**Variant-class values cannot be recovered.** An instance's transform holds
+`x`, `y`, `z`, `scale` and `yaw` and nothing else. Which colour group, species
+or material variant an instance belongs to is not in it. The transform gives
+*placement*, not *classification*. If you need the classification, keep
+writing `userData.instanceSourceRefs` by hand.
 
 **Selection highlighting is mesh-wide for instanced meshes.** Clicking one
 instance outlines every instance in that `InstancedMesh`. Resolution is

@@ -8,7 +8,6 @@ export default defineConfig({
     // transform of its own, so with it either order stamps identically.
     clickToSource({
       stampSource: true, // file/function/line into userData.__ctsSource
-      captureInstances: true, // per-instance transforms for InstancedMesh
       bridge: true, // let @click-to-source-3d/mcp query the running scene
     }),
     react(),
