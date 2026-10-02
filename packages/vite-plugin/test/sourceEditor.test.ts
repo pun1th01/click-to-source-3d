@@ -213,6 +213,71 @@ const second = <mesh color="hotpink" />;`;
     );
   });
 
+  describe("hand-written provenance metadata", () => {
+    // The reported failure: Save rewrote the copy of the value inside the
+    // metadata, said it had saved, and the sphere did not change.
+    it("never edits a literal inside sourceRef, even when it is the only match", () => {
+      const source = [
+        "function Scene() {",
+        "  return (",
+        "    <mesh",
+        "      userData={{ sourceRef: { line: 3, args: { radius: 0.6 } } }}",
+        "    >",
+        "      <sphereGeometry args={[0.6, 32, 32]} />",
+        "    </mesh>",
+        "  );",
+        "}",
+      ].join("\n");
+
+      expect(() =>
+        editSource(source, {
+          file: "Scene.tsx",
+          line: 3,
+          argName: "radius",
+          newValue: 2,
+        })
+      ).toThrowError(
+        expect.objectContaining<Partial<SourceEditError>>({
+          code: "ARGUMENT_NOT_FOUND",
+        })
+      );
+    });
+
+    it("ignores the metadata copy and edits the real declaration beside it", () => {
+      const source = [
+        "const RADIUS = 0.6;",
+        "const sourceRef = { line: 1, args: { RADIUS: 0.6 } };",
+        "const refs = { instanceSourceRefs: [{ sourceRef: { args: { RADIUS: 0.6 } } }] };",
+      ].join("\n");
+
+      const result = editSource(source, {
+        file: "Scene.tsx",
+        line: 1,
+        argName: "RADIUS",
+        newValue: 2,
+      });
+
+      expect(result.split("\n")).toEqual([
+        "const RADIUS = 2;",
+        "const sourceRef = { line: 1, args: { RADIUS: 0.6 } };",
+        "const refs = { instanceSourceRefs: [{ sourceRef: { args: { RADIUS: 0.6 } } }] };",
+      ]);
+    });
+
+    // `line` and `file` are fields of the metadata, not arguments.
+    it("does not offer the metadata's own fields as arguments", () => {
+      const source = `const mesh = <mesh userData={{ sourceRef: { file: "a.tsx", line: 1 } }} />;`;
+
+      expect(() =>
+        editSource(source, { file: "a.tsx", line: 1, argName: "line", newValue: 9 })
+      ).toThrowError(
+        expect.objectContaining<Partial<SourceEditError>>({
+          code: "ARGUMENT_NOT_FOUND",
+        })
+      );
+    });
+  });
+
   it("does not alter the original source when transformation fails", () => {
     const source = `const mesh = <mesh scale={0.35} />;`;
 

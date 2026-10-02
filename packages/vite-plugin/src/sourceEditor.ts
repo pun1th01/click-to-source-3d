@@ -151,6 +151,33 @@ function isSupportedLiteral(node: BabelNode | undefined): node is BabelNode {
   return false;
 }
 
+/**
+ * Names under which provenance metadata is written by hand.
+ *
+ * Everything beneath them describes a value rather than being one. An author
+ * who writes `args: { radius: 0.6 }` beside `<sphereGeometry args={[0.6]} />`
+ * has two literals named or standing for "radius", and only the second one
+ * draws anything. The copy inside the metadata used to be a candidate, and
+ * since its line sits inside the mesh's own element it matched the panel's
+ * request: Save rewrote the label, reported success, and the sphere did not
+ * change.
+ */
+const METADATA_KEYS = new Set(["sourceRef", "instanceSourceRefs"]);
+
+function isMetadata(node: BabelNode): boolean {
+  if (node.type === "ObjectProperty" && node.computed !== true) {
+    const key = getPropertyName(node.key as BabelNode | undefined);
+    return key !== null && METADATA_KEYS.has(key);
+  }
+
+  if (node.type === "VariableDeclarator") {
+    const id = node.id as BabelNode | undefined;
+    return id?.type === "Identifier" && METADATA_KEYS.has(id.name as string);
+  }
+
+  return false;
+}
+
 function collectCandidates(sourceAst: BabelNode): EditCandidate[] {
   const candidates: EditCandidate[] = [];
 
@@ -161,6 +188,10 @@ function collectCandidates(sourceAst: BabelNode): EditCandidate[] {
           visit(item, ancestors);
         }
       }
+      return;
+    }
+
+    if (isMetadata(value)) {
       return;
     }
 
