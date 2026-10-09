@@ -1,6 +1,149 @@
 # Changelog
 
-All five packages are versioned in lockstep.
+All packages are versioned in lockstep.
+
+## 0.1.5
+
+One command, and nothing in your app. Until now, using Click-to-Source meant
+about ten steps by hand: two installs, three plugin options, a click handler,
+three components, a `Canvas` prop, and hand-written `sourceRef` metadata with
+line numbers that had to be kept in sync. Now:
+
+    npx click-to-source-3d init
+
+Start the app, press **Alt+Shift+C**, click anything.
+
+### Upgrading
+
+Nothing breaks: 0.1.4 setups keep working. To simplify one:
+
+- Update `@click-to-source-3d/vite-plugin`, and `@click-to-source-3d/mcp` if
+  you use it.
+- `clickToSource({ stampSource: true, bridge: true })` can become
+  `clickToSource()`.
+- Remove `<SelectionHighlight />`, `<GenerationTrace />`,
+  `<ClickToSourceBridge />`, the click handler and `onPointerMissed`, then
+  uninstall `@click-to-source-3d/overlay`.
+- Drop `CTS_DEV_SERVER` and `CTS_PROJECT_ROOT` from your MCP config.
+
+The README's "Upgrading from 0.1.4 or earlier" has the commands.
+
+### Added
+
+**`npx click-to-source-3d init`** — a new package, `click-to-source-3d`, run
+with `npx` and never installed. It installs the plugin with the project's
+package manager (npm, pnpm, yarn or bun, read from the lockfile, found above
+the app in a monorepo), and adds `clickToSource()` to `vite.config`, editing
+only those two places so the file's formatting survives. It recognises the
+shapes Vite's templates and docs use, including a config written as a
+function, and prints the two lines to paste for anything else rather than
+guessing. It asks once whether to set up the MCP server; `--mcp` and
+`--no-mcp` skip the question. Running it twice changes nothing.
+
+The config editing is written against Babel rather than a config-editing
+library: the library tried first reported success on a function-form config
+while adding only the import, which would have left a project silently not
+set up.
+
+**The inspector, injected by the plugin.** No components, no handler.
+- *Inspect mode*: Alt+Shift+C, or a button in the corner of the canvas.
+  Hovering shows what is under the pointer and its file and line; clicking
+  opens the panel. Clicks go to the inspector, not the app, and drags still
+  orbit the camera. Esc leaves inspect mode, then closes the panel. The
+  shortcut is ignored while typing and is configurable.
+- *The highlight* is drawn after the app's own frame by wrapping the
+  renderer's `render()`, so it never takes over the render loop, composes
+  with post-processing, and keeps antialiasing. One instance of an
+  `InstancedMesh` is highlighted on its own, not the whole mesh.
+- *The panel* lives in a shadow root on `<html>`, outside React and out of
+  reach of the app's CSS. It shows the component, file and line with an
+  **Open** button, the element's props as editable fields, an instance's
+  transform, and mesh details. Objects with no source say so, and name their
+  parents.
+- *Surviving a reload*: inspect mode and the selection come back after the
+  full reload Vite does when an entry module changes.
+- *Discovery* uses three.js's own `__THREE_DEVTOOLS__` hook — shared, not
+  replaced, when the three.js devtools extension installed it first — plus
+  R3F's registry of canvases.
+
+**Editable values with nothing tagged by hand.** The stamp now records every
+literal prop on an element, and on the geometry and material inside it, with
+its exact line and column: `position={[0, 1, 2]}`, `args={[1, 2, 1]}`,
+`color="#fff"`. A prop naming a constant declared once in the same file —
+`args={[1.2, BOX_HEIGHT]}` — is followed to the declaration. Anything computed
+is shown as code. Stamps are hoisted into one table per module and placed on
+its first line, so no line of the module moves.
+
+**Edits by exact position.** The write endpoint takes `line`, `column` and the
+literal's current text, and refuses with the new `STALE_LOCATION` code if the
+text there has changed. Edits by name, for hand-written refs and the MCP tool,
+work as before. Files are written atomically: a plain write let Vite's
+watcher read a half-written file, seen during this release's own end-to-end
+test as a spurious "no JSX found" warning.
+
+**Open in editor**: `POST /__cts/open`, guarded like the other endpoints, uses
+launch-editor as Vite's error overlay does. Set `LAUNCH_EDITOR` to choose.
+
+**The MCP server finds the dev server by itself.** The plugin announces its
+address and root under the OS temp directory while it listens, and the MCP
+server reads that on every call — so it works when the dev server starts
+after the assistant, or on a port other than 5173. In a monorepo it picks the
+dev server closest to where the assistant was started. A dead server's file
+is cleared. `CTS_DEV_SERVER` and `CTS_PROJECT_ROOT` still override it.
+
+**`@click-to-source-3d/core/devtools`**, the framework-free pieces the
+inspector is built from: `pickAt`, `HighlightLayer`, `attachHighlight`,
+`describeMesh`, `editSourceAt`, `connectBridgeOverHot`.
+
+### Changed
+
+- `clickToSource()` turns on stamping, the inspector and the bridge by
+  default. `stampSource: true` and `bridge: true` are no longer needed.
+- The bridge also runs over Vite's own HMR websocket, so it holds no extra
+  connection per tab and can stay on. A hello from a non-loopback address is
+  ignored unless `allowRemote` is set, matching the HTTP endpoints. The SSE
+  transport remains for `<ClickToSourceBridge />` until 0.2.0.
+- `resolve_at_point` returns the object's stamped props, with positions, so an
+  assistant can edit what it finds.
+- `<SelectionHighlight />` uses the same highlight as the inspector: no more
+  `useFrame` priority, no more lost antialiasing, one instance at a time.
+- `@click-to-source-3d/overlay` is legacy. Its components still work; the
+  inspector notes once in the console that they can be removed.
+- The example app has no click-to-source code in it at all.
+
+### Fixed, found by setting up fresh apps
+
+Both were invisible inside this repository, where the plugin is a workspace
+symlink that Vite treats as source code.
+
+- **Two copies of three.** Imported from its file in `node_modules`, the
+  inspector's `import "three"` got three's raw module while the app had the
+  pre-bundled one, and three logged "Multiple instances of Three.js being
+  imported". The inspector is now served as the virtual module itself, so its
+  imports resolve as the app's do.
+- **A reload on first start.** An app whose code imports only R3F never names
+  three, so Vite found the inspector's import late, re-optimised, and reloaded
+  the page. The plugin now names `three` and `@react-three/fiber` for the
+  first optimisation, when they are installed.
+
+Verified by running `init` from packed tarballs in a new `create-vite` app with
+the current three.js, R3F and Vite, under npm and under pnpm 12.
+
+### Repository
+
+- End-to-end tests with Playwright drive the example as a developer would:
+  the hotkey, a click, an edit surviving the reload, the Open request, and an
+  MCP server answering with no configuration. They run in CI on Chromium.
+- The README's screenshots are taken from the example by a Playwright script.
+- The root package is renamed `click-to-source-3d-monorepo`, freeing the name
+  for the CLI.
+- The README gives the supported versions, complete step-by-step setup (by
+  `init` and by hand, with a whole `vite.config`), where Cursor and VS Code
+  keep their MCP config, upgrade steps, troubleshooting, and how to remove
+  it. `init` no longer implies that Cursor reads `.mcp.json`; it points other
+  assistants to those steps.
+- Every published package links back to the repository from npm, and the
+  plugin's npm description says what it does now.
 
 ## 0.1.4
 

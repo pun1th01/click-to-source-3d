@@ -1,6 +1,6 @@
 {
   "name": "@click-to-source-3d/vite-plugin",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "description": "Inspect any object in a React Three Fiber scene: see the line that created it and edit its values. Vite plugin for Click-to-Source 3D.",
   "license": "MIT",
   "keywords": ["threejs", "react-three-fiber", "r3f", "vite", "vite-plugin", "devtools", "inspector"],
@@ -39,7 +39,7 @@
   },
   "dependencies": {
     "@babel/parser": "^7.29.8",
-    "@click-to-source-3d/shared": "0.1.4",
+    "@click-to-source-3d/shared": "0.1.5",
     "launch-editor": "^2.14.2",
     "magic-string": "^0.30.21"
   },
@@ -48,7 +48,7 @@
     "vite": ">=6.0.0 <9.0.0"
   },
   "devDependencies": {
-    "@click-to-source-3d/core": "0.1.4",
+    "@click-to-source-3d/core": "0.1.5",
     "@types/three": "^0.170.0",
     "three": "^0.170.0",
     "vite": "^8.2.1",
