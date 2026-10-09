@@ -95,8 +95,14 @@ function isEditableFile(
  * are refused unless the consumer opts in.
  */
 function isLoopbackRemote(request: IncomingMessage): boolean {
-  const address = request.socket?.remoteAddress;
+  return isLoopbackAddress(request.socket?.remoteAddress);
+}
 
+/**
+ * The same test for an address on its own, for connections that are not an
+ * HTTP request by the time they reach the plugin — the bridge's websocket.
+ */
+export function isLoopbackAddress(address: string | undefined): boolean {
   if (typeof address !== "string" || address.length === 0) {
     // A socket with no address is a stand-in rather than a real connection;
     // in-process tests reach the handler this way.
@@ -234,12 +240,21 @@ function parseRequestBody(
     // changed between the caller's read and its write. `content` is now
     // ignored rather than refused, so a 0.1.3 overlay that still sends it
     // keeps working, and every edit applies to the file as it is on disk.
+    // By position (line, column, expected) or by name (line, argName); see
+    // EditRequest. The editor validates each field again, so this only has
+    // to keep malformed shapes from reaching it.
+    const byPosition = hasOwn(body, "column");
+
     if (
       !Number.isInteger(body.line) ||
       (body.line as number) < 1 ||
-      typeof body.argName !== "string" ||
-      body.argName.length === 0 ||
-      !hasOwn(body, "newValue")
+      !hasOwn(body, "newValue") ||
+      (byPosition
+        ? !Number.isInteger(body.column) ||
+          (body.column as number) < 1 ||
+          typeof body.expected !== "string" ||
+          (hasOwn(body, "argName") && typeof body.argName !== "string")
+        : typeof body.argName !== "string" || body.argName.length === 0)
     ) {
       throw new Error("invalid request body");
     }
@@ -249,7 +264,9 @@ function parseRequestBody(
       edit: {
         file: body.file,
         line: body.line as number,
-        argName: body.argName,
+        argName: typeof body.argName === "string" ? body.argName : undefined,
+        column: byPosition ? (body.column as number) : undefined,
+        expected: byPosition ? (body.expected as string) : undefined,
         newValue: body.newValue,
       },
     };
@@ -356,6 +373,120 @@ async function resolveSafePath(
 }
 
 /**
+ * Replaces a file's contents in one step.
+ *
+ * A plain write truncates the file first, and Vite's watcher can read it in
+ * between: measured during this project's own end-to-end test, the stamping
+ * transform received an empty main.tsx moments after a Save and warned that
+ * another plugin had compiled away its JSX. Writing beside the file and
+ * renaming over it means a watcher sees the old contents or the new, never
+ * neither.
+ *
+ * Falls back to a direct write when the rename is refused — on Windows, by a
+ * file another process holds open, such as a sync client.
+ */
+async function writeAtomically(file: string, content: string): Promise<void> {
+  const temporary = path.join(
+    path.dirname(file),
+    `.${path.basename(file)}.cts-${process.pid}-${Date.now()}.tmp`
+  );
+
+  try {
+    await fs.writeFile(temporary, content, "utf8");
+    await fs.rename(temporary, file);
+  } catch {
+    await fs.rm(temporary, { force: true }).catch(() => undefined);
+    await fs.writeFile(file, content, "utf8");
+  }
+}
+
+/** Opens a file at a position in the developer's editor. */
+export type OpenInEditor = (file: string, line: number, column: number) => void;
+
+function isPosition(value: unknown): boolean {
+  return value === undefined || (Number.isInteger(value) && (value as number) >= 1);
+}
+
+/**
+ * Handles one request to open a source file in the editor.
+ *
+ * Bound by the same rules as reading the file: the caller policy, the
+ * traversal guard, the extension allowlist. Opening is not reading, but a
+ * page that could open any path could probe which files exist, and an editor
+ * launched on an arbitrary file is a strange thing for a dev tool to let a
+ * web page do. `open` is passed in so tests need not launch an editor.
+ */
+export async function handleOpenRequest(
+  request: IncomingMessage,
+  response: ServerResponse,
+  root: string,
+  options: FileRequestOptions,
+  open: OpenInEditor
+) {
+  const refusal = checkCaller(request, options);
+
+  if (refusal) {
+    sendJson(response, refusal.status, { error: refusal.error });
+    return;
+  }
+
+  if (request.method !== "POST") {
+    response.setHeader("Allow", "POST");
+    sendJson(response, 405, { error: "Method not allowed" });
+    return;
+  }
+
+  let body: Record<string, unknown>;
+
+  try {
+    const parsed = await readJsonBody(request);
+    if (
+      !isRecord(parsed) ||
+      typeof parsed.file !== "string" ||
+      parsed.file.length === 0 ||
+      !isPosition(parsed.line) ||
+      !isPosition(parsed.column)
+    ) {
+      throw new Error("invalid request body");
+    }
+    body = parsed;
+  } catch {
+    sendJson(response, 400, { error: "Invalid request body" });
+    return;
+  }
+
+  const file = body.file as string;
+  let filePath: string | null;
+
+  try {
+    filePath = await resolveSafePath(root, file, [root, ...(options.allowedRoots ?? [])]);
+  } catch {
+    sendJson(response, 500, { error: "Filesystem failure" });
+    return;
+  }
+
+  if (!filePath) {
+    sendJson(response, 400, { error: "Invalid file path" });
+    return;
+  }
+
+  if (!isEditableFile(file, options.allowedExtensions)) {
+    sendJson(response, 400, { error: "File type not editable" });
+    return;
+  }
+
+  try {
+    await fs.access(filePath);
+  } catch {
+    sendJson(response, 404, { error: "File not found" });
+    return;
+  }
+
+  open(filePath, (body.line as number | undefined) ?? 1, (body.column as number | undefined) ?? 1);
+  sendJson(response, 200, { opened: true });
+}
+
+/**
  * Handles one read or write request against `root`.
  *
  * Deliberately free of any Vite import: it takes only node:http types, so a
@@ -446,7 +577,7 @@ export async function handleFileRequest(
       return;
     }
 
-    await fs.writeFile(filePath, content, "utf8");
+    await writeAtomically(filePath, content);
     sendJson(response, 200, { success: true });
   } catch (error) {
     const fileSystemError = error as FileSystemError;

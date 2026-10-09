@@ -5,7 +5,14 @@
     "rootDir": "src"
   },
   "references": [
-    { "path": "../shared" }
+    {
+      "path": "../shared"
+    }
   ],
-  "include": ["src/**/*"]
+  "include": [
+    "src/**/*"
+  ],
+  "exclude": [
+    "src/client"
+  ]
 }

@@ -14,11 +14,27 @@ import type { BridgeQuery } from "@click-to-source-3d/shared";
  * "nobody is looking at the page" but not on a timeout.
  */
 
+/** A question as a page receives it. */
+export type BridgeEnvelope = { requestId: string; query: BridgeQuery };
+
+/**
+ * How a question reaches one page: an EventSource stream for
+ * `<ClickToSourceBridge />`, or Vite's HMR websocket for the injected
+ * inspector. The hub only needs to be able to send.
+ */
+export type BridgeChannel = {
+  send: (envelope: BridgeEnvelope) => void;
+  /** Ends the connection when the dev server shuts down, if the hub owns it. */
+  close?: () => void;
+};
+
 type Page = {
   id: number;
-  response: ServerResponse;
+  channel: BridgeChannel;
   url: string;
   session: string | null;
+  /** Identity of the connection, for transports that report it. */
+  key: unknown;
   connectedAt: number;
 };
 
@@ -39,34 +55,45 @@ export class BridgeHub {
   private nextPageId = 1;
   private nextRequestId = 1;
 
+  /**
+   * Registers a page, replacing any earlier registration of the same
+   * document or the same connection.
+   *
+   * One document is one page even when it connects twice. React StrictMode
+   * mounts effects twice in development, and the first stream's close is not
+   * always visible to the server before the second opens — observed live as a
+   * single tab reported as two pages, which made every query ambiguous. The
+   * session id is per document, so a page with the legacy component and the
+   * injected inspector, one on each transport, also counts once.
+   *
+   * The superseded entry is dropped from the map but its connection is left
+   * alone. Ending an EventSource stream would be tidier and is wrong: to the
+   * browser a stream that ends looks like a dropped connection, so it
+   * reconnects, and the reconnect supersedes its own replacement. Measured
+   * with that end() in place, page ids climbed without pause and every query
+   * landed in the gap as `disconnected`.
+   */
+  private register(page: Omit<Page, "id" | "connectedAt">): number {
+    for (const [existingId, existing] of this.pages) {
+      if (
+        (page.session && existing.session === page.session) ||
+        (page.key !== undefined && existing.key === page.key)
+      ) {
+        this.pages.delete(existingId);
+      }
+    }
+
+    const id = this.nextPageId++;
+    this.pages.set(id, { ...page, id, connectedAt: Date.now() });
+    return id;
+  }
+
   /** Attaches a page's event stream. Returns when the page disconnects. */
   handleEvents(request: IncomingMessage, response: ServerResponse): void {
-    const id = this.nextPageId++;
     const session = new URL(
       request.url ?? "/",
       "http://localhost"
     ).searchParams.get("session");
-
-    // One document is one page even when it opens two streams. React
-    // StrictMode mounts effects twice in development, and the first socket's
-    // close is not always visible to the server before the second opens —
-    // observed live as a single tab reported as two pages, which made every
-    // query ambiguous.
-    //
-    // The superseded entry is dropped from the map but its socket is left
-    // alone. Ending it would be tidier and is wrong: to EventSource a stream
-    // that ends looks like a dropped connection, so the browser reconnects,
-    // and the reconnect supersedes its own replacement. Measured with that
-    // end() in place, page ids climbed without pause and every query landed
-    // in the gap as `disconnected`. The abandoned socket costs nothing and
-    // clears itself when the page navigates.
-    if (session) {
-      for (const [existingId, page] of this.pages) {
-        if (page.session === session) {
-          this.pages.delete(existingId);
-        }
-      }
-    }
 
     response.writeHead(200, {
       "Content-Type": "text/event-stream",
@@ -76,19 +103,52 @@ export class BridgeHub {
       // hold events indefinitely and look exactly like a hung page.
       "X-Accel-Buffering": "no",
     });
-    response.write(`: connected ${id}\n\n`);
 
-    this.pages.set(id, {
-      id,
-      response,
+    const id = this.register({
+      channel: {
+        send: (envelope) => {
+          response.write(`data: ${JSON.stringify(envelope)}\n\n`);
+        },
+        close: () => response.end(),
+      },
       url: request.headers.referer ?? "unknown",
       session,
-      connectedAt: Date.now(),
+      key: response,
     });
+    response.write(`: connected ${id}\n\n`);
 
     response.on("close", () => {
       this.pages.delete(id);
     });
+  }
+
+  /**
+   * Attaches a page that speaks over another channel — the injected
+   * inspector, over Vite's HMR websocket.
+   *
+   * `key` identifies the connection, so a page that says hello again after a
+   * reconnect replaces itself instead of becoming a second page; the same key
+   * detaches it.
+   */
+  attach(
+    channel: BridgeChannel,
+    info: { session?: string | null; url?: string; key: unknown }
+  ): number {
+    return this.register({
+      channel,
+      url: info.url ?? "unknown",
+      session: info.session ?? null,
+      key: info.key,
+    });
+  }
+
+  /** Drops the page registered under a connection's key, if any. */
+  detach(key: unknown): void {
+    for (const [id, page] of this.pages) {
+      if (page.key === key) {
+        this.pages.delete(id);
+      }
+    }
   }
 
   /** Accepts a page's answer to an earlier question. */
@@ -162,9 +222,7 @@ export class BridgeHub {
       this.pending.set(requestId, { resolve, timer });
 
       try {
-        page.response.write(
-          `data: ${JSON.stringify({ requestId, query })}\n\n`
-        );
+        page.channel.send({ requestId, query });
       } catch {
         clearTimeout(timer);
         this.pending.delete(requestId);
@@ -183,7 +241,7 @@ export class BridgeHub {
   dispose(): void {
     for (const page of this.pages.values()) {
       try {
-        page.response.end();
+        page.channel.close?.();
       } catch {
         // already gone
       }

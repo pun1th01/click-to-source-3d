@@ -324,15 +324,115 @@ function serializeReplacement(candidate: EditCandidate, newValue: unknown) {
   return serializeValue(newValue);
 }
 
+/**
+ * The literal starting at a 1-based line and column, outside any hand-written
+ * metadata, with the attribute it sits directly in if any.
+ */
+function findLiteralAt(
+  sourceAst: BabelNode,
+  line: number,
+  column: number
+): { node: BabelNode; parent: BabelNode | undefined } | null {
+  let found: { node: BabelNode; parent: BabelNode | undefined } | null = null;
+
+  function visit(value: unknown, parent: BabelNode | undefined) {
+    if (found) {
+      return;
+    }
+    if (!isNode(value)) {
+      if (Array.isArray(value)) {
+        for (const item of value) {
+          visit(item, parent);
+        }
+      }
+      return;
+    }
+    if (isMetadata(value)) {
+      return;
+    }
+
+    const start = value.loc?.start as { line: number; column: number } | undefined;
+    if (
+      start &&
+      start.line === line &&
+      start.column + 1 === column &&
+      isSupportedLiteral(value)
+    ) {
+      found = { node: value, parent };
+      return;
+    }
+
+    for (const [key, child] of Object.entries(value)) {
+      if (!NON_NODE_KEYS.has(key)) {
+        visit(child, value);
+      }
+    }
+  }
+
+  visit(sourceAst, undefined);
+  return found;
+}
+
+/**
+ * Rewrites the literal at an exact position, if it still reads `expected`.
+ *
+ * The inspector learns positions at build time, and a file can change before
+ * Save is pressed — an edit in the editor, or a previous Save that shifted
+ * the line. Checking the text at the position, not just that a literal is
+ * there, is what keeps a stale position from landing on a different value
+ * that happens to start in the same place.
+ */
+function editAtPosition(source: string, ast: BabelNode, request: EditRequest): string {
+  const line = request.line;
+  const column = request.column as number;
+  const expected = request.expected as string;
+  const hit = findLiteralAt(ast, line, column);
+
+  if (!hit) {
+    throw new SourceEditError(
+      "STALE_LOCATION",
+      `No editable value starts at line ${line}, column ${column} of ${request.file}. ` +
+        "The file has changed since the inspector read it; select the object again."
+    );
+  }
+
+  const range = getNodeRange(hit.node);
+  const current = source.slice(range.start, range.end);
+
+  if (current !== expected) {
+    throw new SourceEditError(
+      "STALE_LOCATION",
+      `Line ${line}, column ${column} of ${request.file} now reads ${current}, not ` +
+        `${expected}. The file has changed since the inspector read it; select the ` +
+        "object again."
+    );
+  }
+
+  const replacement =
+    hit.node.type === "StringLiteral" && hit.parent?.type === "JSXAttribute"
+      ? serializeJsxAttributeString(request.newValue)
+      : serializeValue(request.newValue);
+
+  const magicString = new MagicString(source);
+  magicString.overwrite(range.start, range.end, replacement);
+  return magicString.toString();
+}
+
 export function editSource(source: string, request: EditRequest): string {
+  const byPosition = request.column !== undefined;
+
   if (
     typeof source !== "string" ||
     typeof request.file !== "string" ||
     request.file.length === 0 ||
     !Number.isInteger(request.line) ||
     request.line < 1 ||
-    typeof request.argName !== "string" ||
-    request.argName.length === 0
+    (byPosition
+      ? !Number.isInteger(request.column) ||
+        (request.column as number) < 1 ||
+        typeof request.expected !== "string" ||
+        request.expected.length === 0
+      : typeof request.argName !== "string" || request.argName.length === 0)
   ) {
     throw new SourceEditError("INVALID_REQUEST", "Invalid source edit request");
   }
@@ -348,6 +448,10 @@ export function editSource(source: string, request: EditRequest): string {
   } catch (error) {
     const message = error instanceof Error ? error.message : "unknown parse error";
     throw new SourceEditError("PARSE_ERROR", `Unable to parse ${request.file}: ${message}`);
+  }
+
+  if (byPosition) {
+    return editAtPosition(source, ast, request);
   }
 
   const candidates = collectCandidates(ast).filter(

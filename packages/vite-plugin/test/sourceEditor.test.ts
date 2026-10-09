@@ -1,5 +1,120 @@
 import { describe, expect, it } from "vitest";
+import type { SourceStamp } from "@click-to-source-3d/shared";
 import { editSource, SourceEditError } from "../src/sourceEditor.js";
+import { stampSource } from "../src/stampSource.js";
+
+/**
+ * Edits by exact position, the mode the inspector uses for values the build
+ * step found. The positions come from the stamp itself, so these tests hold
+ * the two halves to one contract: whatever the stamp says is editable, the
+ * editor can edit, at exactly that place.
+ */
+describe("editSource by position", () => {
+  const SCENE = [
+    "const HEIGHT = 1.4;",
+    "export function Scene() {",
+    "  return (",
+    '    <mesh position={[-2.2, 0, 6]} name="box">',
+    "      <boxGeometry args={[1.2, HEIGHT, 1.2]} />",
+    '      <meshStandardMaterial color="#c2643c" />',
+    "    </mesh>",
+    "  );",
+    "}",
+  ].join("\n");
+
+  const stamp = (): SourceStamp => {
+    const out = stampSource(SCENE, "/r/src/Scene.tsx", { root: "/r" })!.code;
+    return (JSON.parse(out.match(/^const __ctsStamps = (\[.*?\]); /)![1]) as SourceStamp[])[0];
+  };
+
+  it("edits every value the stamp marks editable, and only that value", () => {
+    const editable = stamp()
+      .props!.flatMap((p) => p.values)
+      .filter((v) => v.editable);
+
+    expect(editable.length).toBe(8);
+
+    for (const value of editable) {
+      const replacement = typeof value.value === "number" ? 9.5 : "teal";
+      const result = editSource(SCENE, {
+        file: "src/Scene.tsx",
+        line: value.line!,
+        column: value.column!,
+        expected: value.raw,
+        newValue: replacement,
+      });
+
+      const changed = result.split("\n").filter((line, i) => line !== SCENE.split("\n")[i]);
+      expect(changed, value.raw).toHaveLength(1);
+      expect(changed[0], value.raw).toContain(
+        typeof replacement === "number" ? "9.5" : '"teal"'
+      );
+    }
+  });
+
+  it("edits a constant at its declaration", () => {
+    const height = stamp().props!.find((p) => p.element === "boxGeometry")!.values[1];
+
+    const result = editSource(SCENE, {
+      file: "src/Scene.tsx",
+      line: height.line!,
+      column: height.column!,
+      expected: height.raw,
+      newValue: 2,
+    });
+
+    expect(result.split("\n")[0]).toBe("const HEIGHT = 2;");
+  });
+
+  it("writes a JSX attribute string as an attribute, not an expression", () => {
+    const result = editSource(SCENE, {
+      file: "src/Scene.tsx",
+      line: 6,
+      column: SCENE.split("\n")[5].indexOf('"#c2643c"') + 1,
+      expected: '"#c2643c"',
+      newValue: 'say "hi"',
+    });
+
+    expect(result.split("\n")[5]).toBe('      <meshStandardMaterial color="say &quot;hi&quot;" />');
+  });
+
+  // The file changed between the stamp and Save. The position may now hold
+  // nothing, or a different literal; either way nothing is written.
+  it("refuses a position that no longer holds the expected text", () => {
+    const edited = SCENE.replace("-2.2", "-3.5");
+
+    for (const request of [
+      { line: 4, column: 22, expected: "-2.2" }, // same place, different text
+      { line: 4, column: 23, expected: "2.2" }, // not where a literal starts
+      { line: 99, column: 1, expected: "1" }, // past the end of the file
+    ]) {
+      expect(() =>
+        editSource(edited, { file: "src/Scene.tsx", newValue: 0, ...request })
+      ).toThrowError(
+        expect.objectContaining<Partial<SourceEditError>>({ code: "STALE_LOCATION" })
+      );
+    }
+  });
+
+  it("never edits inside hand-written provenance, even by position", () => {
+    const source = 'const m = <mesh userData={{ sourceRef: { args: { r: 0.6 } } }} />;';
+    const column = source.indexOf("0.6") + 1;
+
+    expect(() =>
+      editSource(source, { file: "a.tsx", line: 1, column, expected: "0.6", newValue: 1 })
+    ).toThrowError(
+      expect.objectContaining<Partial<SourceEditError>>({ code: "STALE_LOCATION" })
+    );
+  });
+
+  it("requires the expected text with a column", () => {
+    expect(() =>
+      editSource(SCENE, { file: "src/Scene.tsx", line: 4, column: 22, newValue: 0 })
+    ).toThrowError(
+      expect.objectContaining<Partial<SourceEditError>>({ code: "INVALID_REQUEST" })
+    );
+  });
+});
 
 function lineContaining(source: string, text: string, occurrence = 1): number {
   let seen = 0;

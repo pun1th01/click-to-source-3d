@@ -1,6 +1,11 @@
 import path from "node:path";
 import { parse } from "@babel/parser";
 import MagicString from "magic-string";
+import type {
+  SourceStamp,
+  StampedProp,
+  StampedValue,
+} from "@click-to-source-3d/shared";
 
 /**
  * Host elements that carry no transform of their own and are never the answer
@@ -49,9 +54,187 @@ type Node = {
   type: string;
   start?: number | null;
   end?: number | null;
-  loc?: { start: { line: number } } | null;
+  loc?: { start: { line: number; column: number } } | null;
   [key: string]: unknown;
 };
+
+/**
+ * Props that are never values a developer tunes: React's own, R3F's wiring,
+ * the stamp's own target, and the object handed to a <primitive>.
+ */
+const SKIPPED_PROPS = new Set([
+  "key",
+  "ref",
+  "children",
+  "userData",
+  "attach",
+  "dispose",
+  "object",
+  "geometry",
+  "material",
+]);
+
+/** Longest expression text kept for a value the panel can only show. */
+const MAX_EXPRESSION = 80;
+
+function isGeometryOrMaterial(name: string): boolean {
+  return SKIPPED_SUFFIXES.some((suffix) => name.endsWith(suffix));
+}
+
+function isLiteral(node: Node | undefined): boolean {
+  if (!node) {
+    return false;
+  }
+  if (
+    node.type === "StringLiteral" ||
+    node.type === "NumericLiteral" ||
+    node.type === "BooleanLiteral" ||
+    node.type === "NullLiteral"
+  ) {
+    return true;
+  }
+  return (
+    node.type === "UnaryExpression" &&
+    node.operator === "-" &&
+    (node.argument as Node | undefined)?.type === "NumericLiteral"
+  );
+}
+
+function literalValue(node: Node): string | number | boolean | null {
+  if (node.type === "NullLiteral") {
+    return null;
+  }
+  if (node.type === "UnaryExpression") {
+    return -((node.argument as Node).value as number);
+  }
+  return node.value as string | number | boolean;
+}
+
+/** Every name bound by a pattern: `a`, `{ a, b: [c] }`, `...rest`, `x = 1`. */
+function patternNames(pattern: Node | null | undefined, out: string[] = []): string[] {
+  if (!pattern) {
+    return out;
+  }
+  switch (pattern.type) {
+    case "Identifier":
+      out.push(pattern.name as string);
+      break;
+    case "AssignmentPattern":
+      patternNames(pattern.left as Node, out);
+      break;
+    case "RestElement":
+      patternNames(pattern.argument as Node, out);
+      break;
+    case "ObjectPattern":
+      for (const property of pattern.properties as Node[]) {
+        patternNames(
+          (property.type === "RestElement" ? property : property.value) as Node,
+          out
+        );
+      }
+      break;
+    case "ArrayPattern":
+      for (const element of pattern.elements as Array<Node | null>) {
+        patternNames(element, out);
+      }
+      break;
+    case "TSParameterProperty":
+      patternNames(pattern.parameter as Node, out);
+      break;
+  }
+  return out;
+}
+
+/**
+ * The constants an identifier in JSX can safely be followed to.
+ *
+ * `args={[1.2, BOX_HEIGHT]}` is only editable at `const BOX_HEIGHT = 1.4`, and
+ * only if that declaration is what the identifier means. Scope is not
+ * modelled, so the rule is conservative instead: a name resolves only when the
+ * file binds it exactly once, by a `const` with a literal value. A parameter,
+ * a `let`, an import or a second declaration of the same name anywhere in the
+ * file makes it ambiguous, and the value is shown read-only rather than
+ * edited at a declaration that may not be the one in scope.
+ */
+function constantsOf(program: Node): Map<string, Node> {
+  const bindings = new Map<string, number>();
+  const literals = new Map<string, Node>();
+  const bind = (name: string) => bindings.set(name, (bindings.get(name) ?? 0) + 1);
+
+  const walk = (node: Node | null | undefined, inConst: boolean) => {
+    if (!node || typeof node.type !== "string") {
+      return;
+    }
+
+    switch (node.type) {
+      case "VariableDeclaration":
+        for (const declarator of node.declarations as Node[]) {
+          for (const name of patternNames(declarator.id as Node)) {
+            bind(name);
+          }
+          const id = declarator.id as Node;
+          const init = declarator.init as Node | undefined;
+          if (node.kind === "const" && id.type === "Identifier" && isLiteral(init)) {
+            literals.set(id.name as string, init!);
+          }
+          walk(init, false);
+        }
+        return;
+      case "FunctionDeclaration":
+      case "FunctionExpression":
+      case "ArrowFunctionExpression":
+      case "ObjectMethod":
+      case "ClassMethod":
+        if (node.type === "FunctionDeclaration" && (node.id as Node | null)) {
+          bind((node.id as Node).name as string);
+        }
+        for (const param of node.params as Node[]) {
+          for (const name of patternNames(param)) {
+            bind(name);
+          }
+        }
+        break;
+      case "ClassDeclaration":
+        if (node.id as Node | null) {
+          bind((node.id as Node).name as string);
+        }
+        break;
+      case "ImportDeclaration":
+        for (const specifier of node.specifiers as Node[]) {
+          bind((specifier.local as Node).name as string);
+        }
+        return;
+      case "CatchClause":
+        for (const name of patternNames(node.param as Node | null)) {
+          bind(name);
+        }
+        break;
+    }
+
+    for (const key of Object.keys(node)) {
+      if (key === "loc" || key.endsWith("Comments")) {
+        continue;
+      }
+      const value = node[key];
+      if (Array.isArray(value)) {
+        for (const item of value) {
+          walk(item as Node, inConst);
+        }
+      } else if (value && typeof value === "object") {
+        walk(value as Node, inConst);
+      }
+    }
+  };
+
+  walk(program, false);
+
+  for (const name of [...literals.keys()]) {
+    if (bindings.get(name) !== 1) {
+      literals.delete(name);
+    }
+  }
+  return literals;
+}
 
 /**
  * Calls that wrap a component without renaming it. The function inside
@@ -240,17 +423,113 @@ export function stampSource(
 
   const magic = new MagicString(code);
   const file = relativeFile(options.root, filename);
-  let stamped = 0;
+  const constants = constantsOf(ast.program as unknown as Node);
+  const stamps: SourceStamp[] = [];
+
+  // Every stamp in the module lives in one table, declared once, and an
+  // element refers to its entry. Inlining each stamp as an object literal
+  // would allocate it on every render, and now that a stamp carries its
+  // element's props, would repeat them through the JSX as well. The name is
+  // lengthened until it collides with nothing in the file.
+  let table = "__ctsStamps";
+  while (code.includes(table)) {
+    table += "_";
+  }
 
   const ancestors: Node[] = [];
+
+  /** One value as the panel shows it: a literal it can edit, or text it cannot. */
+  const describeValue = (node: Node | null | undefined): StampedValue => {
+    if (!node || node.type === "SpreadElement") {
+      return { raw: node ? code.slice(node.start as number, node.end as number) : "", editable: false };
+    }
+
+    if (isLiteral(node)) {
+      return {
+        raw: code.slice(node.start as number, node.end as number),
+        value: literalValue(node),
+        editable: true,
+        line: node.loc!.start.line,
+        column: node.loc!.start.column + 1,
+      };
+    }
+
+    if (node.type === "Identifier") {
+      const declared = constants.get(node.name as string);
+      if (declared) {
+        return {
+          raw: code.slice(declared.start as number, declared.end as number),
+          value: literalValue(declared),
+          editable: true,
+          line: declared.loc!.start.line,
+          column: declared.loc!.start.column + 1,
+          via: node.name as string,
+        };
+      }
+    }
+
+    const text = code.slice(node.start as number, node.end as number).replace(/\s+/g, " ");
+    return {
+      raw: text.length > MAX_EXPRESSION ? `${text.slice(0, MAX_EXPRESSION - 1)}…` : text,
+      editable: false,
+    };
+  };
+
+  /** The props written on one opening element, as the panel lists them. */
+  const propsOf = (opening: Node, element: string): StampedProp[] => {
+    const props: StampedProp[] = [];
+
+    for (const attribute of (opening.attributes ?? []) as Node[]) {
+      const nameNode = attribute.name as Node | undefined;
+      if (attribute.type !== "JSXAttribute" || nameNode?.type !== "JSXIdentifier") {
+        continue;
+      }
+      const name = nameNode.name as string;
+      if (SKIPPED_PROPS.has(name) || /^on[A-Z]/.test(name)) {
+        continue;
+      }
+
+      const value = attribute.value as Node | null;
+
+      if (value === null) {
+        // `<mesh castShadow />`: true, but there is no literal to rewrite.
+        props.push({ element, name, array: false, values: [{ raw: "true", value: true, editable: false }] });
+        continue;
+      }
+      if (value.type === "StringLiteral") {
+        props.push({ element, name, array: false, values: [describeValue(value)] });
+        continue;
+      }
+      if (value.type !== "JSXExpressionContainer") {
+        continue;
+      }
+
+      const expression = value.expression as Node;
+      if (expression.type === "JSXEmptyExpression") {
+        continue;
+      }
+      if (expression.type === "ArrayExpression") {
+        props.push({
+          element,
+          name,
+          array: true,
+          values: (expression.elements as Array<Node | null>).map(describeValue),
+        });
+        continue;
+      }
+      props.push({ element, name, array: false, values: [describeValue(expression)] });
+    }
+
+    return props;
+  };
 
   const visit = (node: Node | null | undefined): void => {
     if (!node || typeof node.type !== "string") {
       return;
     }
 
-    if (node.type === "JSXOpeningElement") {
-      stamped += stampElement(node) ? 1 : 0;
+    if (node.type === "JSXElement") {
+      stampElement(node.openingElement as Node, node);
     }
 
     ancestors.push(node);
@@ -274,22 +553,45 @@ export function stampSource(
     ancestors.pop();
   };
 
-  const stampElement = (element: Node): boolean => {
+  const stampElement = (element: Node, jsx: Node): boolean => {
     const name = hostName(element.name as Node | undefined);
 
     if (!name || !isStampable(name)) {
       return false;
     }
 
-    const line = element.loc?.start.line;
-    if (line === undefined) {
+    const start = element.loc?.start;
+    if (start === undefined) {
       return false;
     }
 
-    const stamp =
-      `{ file: ${JSON.stringify(file)}, ` +
-      `function: ${JSON.stringify(enclosingFunctionName(ancestors, file))}, ` +
-      `line: ${line} }`;
+    // The element's own props, then those of the geometry and material
+    // written directly inside it: `<boxGeometry args={[1, 2, 1]} />` is never
+    // stamped itself, but its args are what a developer reaches for when they
+    // click the mesh.
+    const props = propsOf(element, name);
+    for (const child of (jsx.children ?? []) as Node[]) {
+      if (child.type !== "JSXElement") {
+        continue;
+      }
+      const childOpening = child.openingElement as Node;
+      const childName = hostName(childOpening.name as Node | undefined);
+      if (childName && isHostElement(childName) && isGeometryOrMaterial(childName)) {
+        props.push(...propsOf(childOpening, childName));
+      }
+    }
+
+    const entry: SourceStamp = {
+      file,
+      function: enclosingFunctionName(ancestors, file),
+      line: start.line,
+      column: start.column + 1,
+    };
+    if (props.length > 0) {
+      entry.props = props;
+    }
+    stamps.push(entry);
+    const stamp = `${table}[${stamps.length - 1}]`;
 
     // With no explicit userData the stamp is a pierced prop, which R3F
     // resolves as `object.userData.__ctsSource = stamp`, adding one key to
@@ -358,24 +660,33 @@ export function stampSource(
     if (!value || value.type !== "JSXExpressionContainer") {
       // userData="literal" is not a shape we can merge into; leave it alone
       // rather than guessing.
+      stamps.pop();
       return false;
     }
 
     const expression = value.expression as Node;
-    const start = expression.start as number;
-    const end = expression.end as number;
 
     // Spread the author's value first so their keys survive, then add ours.
-    magic.appendLeft(start, "{ ...");
-    magic.appendRight(end, `, __ctsSource: ${stamp} }`);
+    magic.appendLeft(expression.start as number, "{ ...");
+    magic.appendRight(expression.end as number, `, __ctsSource: ${stamp} }`);
     return true;
   };
 
   visit(ast.program as unknown as Node);
 
-  if (stamped === 0) {
+  if (stamps.length === 0) {
     return null;
   }
+
+  // On the first line, so no line of the module moves and a stack trace or a
+  // stamped line reads the same with or without a sourcemap. After any
+  // directive prologue, which has to stay first to mean anything.
+  const directives = ((ast.program as unknown as Node).directives ?? []) as Node[];
+  const tableAt = directives.length > 0 ? (directives[directives.length - 1].end as number) : 0;
+  magic.appendLeft(
+    tableAt,
+    `${tableAt > 0 ? " " : ""}const ${table} = ${JSON.stringify(stamps)};${tableAt > 0 ? "" : " "}`
+  );
 
   return {
     code: magic.toString(),

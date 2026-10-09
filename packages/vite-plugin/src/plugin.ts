@@ -1,20 +1,32 @@
 import {
   BRIDGE_EVENTS_PATH,
+  BRIDGE_HELLO_EVENT,
+  BRIDGE_QUERY_EVENT,
   BRIDGE_QUERY_PATH,
+  BRIDGE_REPLY_EVENT,
   BRIDGE_REPLY_PATH,
+  OPEN_IN_EDITOR_PATH,
   READ_FILE_PATH,
   WRITE_FILE_PATH,
 } from "@click-to-source-3d/shared";
 import type { BridgeQuery } from "@click-to-source-3d/shared";
+import launchEditor from "launch-editor";
+import { existsSync, readFileSync } from "node:fs";
+import { createRequire } from "node:module";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { BridgeHub } from "./bridgeHub.js";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { Plugin, ResolvedConfig } from "vite";
 import {
   checkCaller,
+  isLoopbackAddress,
   DEFAULT_ALLOWED_EXTENSIONS,
   handleFileRequest,
+  handleOpenRequest,
   type FileRequestOptions,
 } from "./middleware.js";
+import { announceDevServer } from "./registry.js";
 import { stampSource } from "./stampSource.js";
 
 const TRAILING_SLASHES = new RegExp("/+$");
@@ -72,8 +84,9 @@ export type ClickToSourceOptions = {
    * would put the developer's home directory on screen in every screenshot
    * and shared session.
    *
-   * `true` stamps in dev only. `"always"` also stamps production builds —
-   * off by default, and not merely to save bytes: a stamp names a source file
+   * On by default. `true` stamps in dev only. `"always"` also stamps
+   * production builds — not the default, and not merely to save bytes: a stamp
+   * names a source file
    * and the component that produced it, so shipping one publishes your
    * project's file layout and internal component names to every visitor, with
    * no user-facing benefit, since the overlay that reads these is not in a
@@ -111,17 +124,63 @@ export type ClickToSourceOptions = {
    */
   allowRemote?: boolean;
   /**
-   * Open the scene bridge, letting an out-of-process client ask the running
-   * page about its own contents.
+   * Open the scene bridge, letting an out-of-process client — the MCP server
+   * an AI assistant runs — ask the running page about its own contents.
    *
-   * Off by default and dev only. Always-on would mean every dev server holds
-   * an event stream and serialises scene state for a tool nobody is running.
-   *
-   * Requires <ClickToSourceBridge /> inside the Canvas: the bridge needs a
-   * scene and a camera, which only a component inside the R3F tree can supply.
+   * On by default, dev only. The injected inspector answers over Vite's own
+   * HMR websocket, which is already open, so an idle bridge costs nothing.
+   * `<ClickToSourceBridge />` still works and is no longer needed.
    */
   bridge?: boolean;
+  /**
+   * Inject the inspector into every page the dev server serves: a toggle
+   * button on the canvas and a keyboard shortcut that turn on inspect mode,
+   * in which clicking an object shows where it came from and lets its values
+   * be edited in place.
+   *
+   * On by default, dev only — nothing is added to a build. `false` turns it
+   * off; an object configures it.
+   */
+  inspector?:
+    | boolean
+    | {
+        /** Default "alt+shift+c". */
+        hotkey?: string;
+        /** Show the toggle button on the canvas. Default true. */
+        button?: boolean;
+      };
 };
+
+/**
+ * Whether a package is installed where the project can import it: in a
+ * node_modules beside the project or above it, as a monorepo hoists.
+ */
+function isInstalled(root: string, name: string): boolean {
+  for (let dir = root; ; dir = path.dirname(dir)) {
+    if (existsSync(path.join(dir, "node_modules", name, "package.json"))) {
+      return true;
+    }
+    if (path.dirname(dir) === dir) {
+      return false;
+    }
+  }
+}
+
+/** Reported to the MCP server, which shows it if the two disagree. */
+const PLUGIN_VERSION = (createRequire(import.meta.url)("../package.json") as { version: string }).version;
+
+const CLIENT_MODULE_ID = "virtual:click-to-source/client";
+const RESOLVED_CLIENT_ID = `\0${CLIENT_MODULE_ID}`;
+
+/**
+ * The bundled inspector. Built beside this file in dist/; when this file runs
+ * from src/ — under the test runner — the bundle is in the sibling dist/.
+ */
+const CLIENT_FILE = (() => {
+  const here = path.dirname(fileURLToPath(import.meta.url));
+  const candidates = [path.join(here, "client.js"), path.join(here, "..", "dist", "client.js")];
+  return candidates.find((candidate) => existsSync(candidate)) ?? candidates[0];
+})();
 
 /**
  * Serves the source read/write endpoints the Click-to-Source overlay calls.
@@ -140,8 +199,16 @@ export function clickToSource(options: ClickToSourceOptions = {}): Plugin {
     allowRemote: options.allowRemote ?? false,
   };
 
-  const stamping = options.stampSource ?? false;
-  const bridging = options.bridge ?? false;
+  const stamping = options.stampSource ?? true;
+  const bridging = options.bridge ?? true;
+  const inspector =
+    options.inspector === false
+      ? null
+      : {
+          hotkey: (typeof options.inspector === "object" && options.inspector.hotkey) || "alt+shift+c",
+          button: typeof options.inspector === "object" ? options.inspector.button !== false : true,
+        };
+  const injecting = inspector !== null || bridging;
   const hub = new BridgeHub();
   let warnedAboutOrder = false;
 
@@ -158,6 +225,23 @@ export function clickToSource(options: ClickToSourceOptions = {}): Plugin {
       // The endpoints are dev-only. The build is entered only to stamp, and
       // only when the caller opted into production stamping.
       return env.command === "serve" || stamping === "always";
+    },
+    config(config, env) {
+      if (env.command !== "serve" || !injecting) {
+        return;
+      }
+
+      // The inspector imports three, and R3F's registry when the project has
+      // R3F. Vite's start-up scan reads the application's own code, and an
+      // application whose code imports only R3F never names three itself —
+      // so the inspector's import was discovered late, after the first page
+      // had loaded, and Vite re-optimised and reloaded the page. Measured in
+      // a freshly created app. Naming both up front puts them in the first
+      // optimisation. Only what is installed is named, so a project without
+      // R3F gets no "failed to resolve" warning.
+      const root = path.resolve(config.root ?? process.cwd());
+      const include = ["three", "@react-three/fiber"].filter((name) => isInstalled(root, name));
+      return include.length > 0 ? { optimizeDeps: { include } } : undefined;
     },
     configResolved(config) {
       resolvedConfig = config;
@@ -178,6 +262,18 @@ export function clickToSource(options: ClickToSourceOptions = {}): Plugin {
         return null;
       }
       if (!/\.[jt]sx$/.test(id.split("?")[0])) {
+        return null;
+      }
+      // A dependency's JSX is the dependency's: its paths would be outside
+      // the project and its values nothing a developer edits.
+      if (id.includes("/node_modules/")) {
+        return null;
+      }
+
+      // An empty module is a file caught mid-write by the watcher, not a
+      // compiled one; there is nothing to warn about, and the next change
+      // event brings the real contents.
+      if (code.trim() === "") {
         return null;
       }
 
@@ -201,9 +297,148 @@ export function clickToSource(options: ClickToSourceOptions = {}): Plugin {
       return stampSource(code, id.split("?")[0], { root: resolvedConfig.root });
     },
 
+    transformIndexHtml: {
+      order: "pre",
+      handler(_html, context) {
+        // Dev only. In a build there is no dev server to answer the inspector
+        // or the bridge, and nothing should reach a visitor.
+        if (!context.server || !injecting) {
+          return;
+        }
+
+        // A module script at the very top of <head>. Module scripts run in
+        // document order, so the inspector is listening on three's devtools
+        // hook before the application constructs its first renderer.
+        return [
+          {
+            tag: "script",
+            attrs: { type: "module", src: `/@id/__x00__${CLIENT_MODULE_ID}` },
+            injectTo: "head-prepend" as const,
+          },
+        ];
+      },
+    },
+
+    resolveId(id) {
+      return id === CLIENT_MODULE_ID ? RESOLVED_CLIENT_ID : null;
+    },
+
+    async load(id) {
+      if (id !== RESOLVED_CLIENT_ID) {
+        return null;
+      }
+
+      // R3F's registry of canvases, when the project has R3F. Imported here,
+      // in the application's module graph, so it is the application's own
+      // copy — the one holding its canvases.
+      const r3f = await this.resolve(
+        "@react-three/fiber",
+        path.join(resolvedConfig.root, "index.html")
+      ).catch(() => null);
+
+      const clientOptions = {
+        inspector: inspector !== null,
+        bridge: bridging,
+        hotkey: inspector?.hotkey ?? "alt+shift+c",
+        button: inspector?.button ?? false,
+      };
+
+      // The bundled inspector's own source, served as this virtual module
+      // rather than imported from inside node_modules.
+      //
+      // The difference is which three it gets. Imported from its file in
+      // node_modules, the bundle is a dependency Vite has not pre-bundled,
+      // and its `import "three"` resolved to three's raw module while the
+      // application had the pre-bundled one: two copies of three in one page,
+      // and three's own "Multiple instances" warning in every project that
+      // installed the plugin. This repository's example never showed it,
+      // because there the plugin is a workspace symlink, which Vite treats as
+      // source. As a virtual module the code is source in every project, so
+      // its imports resolve exactly as the application's do.
+      // The bundle's own sourcemap comment would point the browser at a .map
+      // beside the virtual module, which does not exist; the map is returned
+      // with the code instead.
+      const client = readFileSync(CLIENT_FILE, "utf8").replace(
+        /\/\/# sourceMappingURL=\S+\s*$/,
+        ""
+      );
+      const mapFile = `${CLIENT_FILE}.map`;
+      const map = existsSync(mapFile) ? readFileSync(mapFile, "utf8") : null;
+
+      return {
+        // Appended after the bundle, so the bundle's sourcemap still lines up.
+        code: [
+          client,
+          r3f ? `import * as __ctsR3F from "@react-three/fiber";` : "const __ctsR3F = null;",
+          `startDevtools({ hot: import.meta.hot, r3fRoots: __ctsR3F ? __ctsR3F._roots : null, options: ${JSON.stringify(clientOptions)} });`,
+        ].join("\n"),
+        map,
+      };
+    },
+
     configureServer(server) {
+      // Announce the server once it is listening, so the MCP server can find
+      // it without being configured. Its address is known only then:
+      // resolvedUrls is null at the httpServer "listening" event and is
+      // assigned only after listen() resolves, so listen() itself is wrapped.
+      const listen = server.listen.bind(server);
+      server.listen = async (...args: Parameters<typeof server.listen>) => {
+        const listening = await listen(...args);
+        const origin = server.resolvedUrls?.local[0];
+        if (origin) {
+          const withdraw = announceDevServer({
+            origin: new URL(origin).origin,
+            root: resolvedConfig.root,
+            version: PLUGIN_VERSION,
+          });
+          server.httpServer?.once("close", withdraw);
+        }
+        return listening;
+      };
+
       if (bridging) {
         server.httpServer?.on("close", () => hub.dispose());
+
+        // The injected inspector's transport: Vite's own HMR websocket, which
+        // is already open to every page and refuses a browser on a foreign
+        // origin. It does admit a client that sends no Origin at all, which
+        // under `vite --host` includes the network, so the same loopback rule
+        // as the HTTP endpoints applies to who may register as a page.
+        // A page is keyed by its socket, so a repeat hello after a reconnect
+        // replaces it, and the socket closing removes it.
+        const remoteAddresses = new WeakMap<object, string | undefined>();
+
+        server.ws.on("connection", (socket: object, request?: IncomingMessage) => {
+          remoteAddresses.set(socket, request?.socket?.remoteAddress);
+        });
+
+        server.ws.on(BRIDGE_HELLO_EVENT, (data, client) => {
+          const hello = (data ?? {}) as { session?: unknown; url?: unknown };
+          const socket = (client as { socket?: { once?: (e: string, f: () => void) => void } })
+            .socket;
+          const key = socket ?? client;
+
+          if (
+            !requestOptions.allowRemote &&
+            !isLoopbackAddress(remoteAddresses.get(key as object))
+          ) {
+            return;
+          }
+
+          hub.attach(
+            { send: (envelope) => client.send(BRIDGE_QUERY_EVENT, envelope) },
+            {
+              key,
+              session: typeof hello.session === "string" ? hello.session : null,
+              url: typeof hello.url === "string" ? hello.url : "unknown",
+            }
+          );
+          socket?.once?.("close", () => hub.detach(key));
+        });
+
+        server.ws.on(BRIDGE_REPLY_EVENT, (data) => {
+          hub.handleReply((data ?? {}) as { requestId?: string; result?: unknown });
+        });
       }
 
       /**
@@ -286,8 +521,8 @@ export function clickToSource(options: ClickToSourceOptions = {}): Plugin {
               return {
                 status: "disabled",
                 reason:
-                  "The scene bridge is off. Pass bridge: true to clickToSource() " +
-                  "and add <ClickToSourceBridge /> inside your Canvas.",
+                  "The scene bridge is off. Remove bridge: false from " +
+                  "clickToSource() in the Vite config.",
               };
             }
 
@@ -317,6 +552,21 @@ export function clickToSource(options: ClickToSourceOptions = {}): Plugin {
             resolvedConfig.root,
             "read",
             fileOptions()
+          );
+          return;
+        }
+
+        if (pathname === OPEN_IN_EDITOR_PATH) {
+          void handleOpenRequest(
+            request,
+            response,
+            resolvedConfig.root,
+            fileOptions(),
+            (file, line, column) => {
+              // launch-editor picks the editor from LAUNCH_EDITOR, EDITOR or the
+              // running processes, and reports a failure to the terminal.
+              launchEditor(`${file}:${line}:${column}`);
+            }
           );
           return;
         }

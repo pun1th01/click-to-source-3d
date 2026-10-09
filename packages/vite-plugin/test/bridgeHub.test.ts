@@ -267,3 +267,54 @@ describe("BridgeHub page identity", () => {
     expect(hub.pageCount()).toBe(2);
   });
 });
+
+describe("BridgeHub pages on other channels", () => {
+  function sessionPage(session: string) {
+    const page = fakePage();
+    (page.request as { url?: string }).url = `/__cts/bridge/events?session=${session}`;
+    return page;
+  }
+
+  function channelPage() {
+    const sent: Array<{ requestId: string }> = [];
+    return { channel: { send: (envelope: { requestId: string }) => sent.push(envelope) }, sent };
+  }
+
+  it("answers a page attached over a channel", async () => {
+    const hub = new BridgeHub();
+    const page = channelPage();
+    hub.attach(page.channel, { key: "socket-1", session: "s1" });
+
+    const pending = hub.query({ kind: "list_scene_provenance" });
+    hub.handleReply({ requestId: page.sent[0].requestId, result: { status: "ready" } });
+
+    expect(await pending).toMatchObject({ status: "answered", result: { status: "ready" } });
+  });
+
+  it("detaches a page by its connection", async () => {
+    const hub = new BridgeHub();
+    hub.attach(channelPage().channel, { key: "socket-1", session: "s1" });
+    hub.detach("socket-1");
+
+    expect(await hub.query({ kind: "list_scene_provenance" })).toEqual({ status: "disconnected" });
+  });
+
+  it("replaces a page that says hello again on the same connection", () => {
+    const hub = new BridgeHub();
+    hub.attach(channelPage().channel, { key: "socket-1" });
+    hub.attach(channelPage().channel, { key: "socket-1" });
+
+    expect(hub.pageCount()).toBe(1);
+  });
+
+  // A tab with both the legacy component and the injected inspector has one
+  // session and two transports. Counted twice, every query would be ambiguous.
+  it("counts one document on two transports as one page", () => {
+    const hub = new BridgeHub();
+    const legacy = sessionPage("same-tab");
+    hub.handleEvents(legacy.request, legacy.response);
+    hub.attach(channelPage().channel, { key: "socket-1", session: "same-tab" });
+
+    expect(hub.pageCount()).toBe(1);
+  });
+});
