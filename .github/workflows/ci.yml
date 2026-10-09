@@ -49,3 +49,39 @@ jobs:
       # platform was left out.
       - name: Test
         run: npm test -- --reporter=verbose
+
+  # The example app driven in a real browser: the inspector's hotkey, a
+  # click, an edit written to source and surviving the reload, and an MCP
+  # server finding the dev server with no configuration. Several fixes in
+  # this project's history were found only by driving the real overlay;
+  # this is that, on every push.
+  e2e:
+    name: end-to-end · ubuntu · node 24
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: End-to-end tests
+        run: npm run test:e2e
+
+      - name: Keep the trace of a failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-results
+          path: test-results/

@@ -50,3 +50,7 @@ packages/*/test/**/*.d.ts
 packages/examples/*.js
 packages/examples/*.d.ts
 
+
+# Playwright
+test-results/
+playwright-report/
