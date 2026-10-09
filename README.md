@@ -2,352 +2,331 @@
 
 [![CI](https://github.com/pun1th01/click-to-source-3d/actions/workflows/ci.yml/badge.svg)](https://github.com/pun1th01/click-to-source-3d/actions/workflows/ci.yml)
 
-**Source-level debugging for React Three Fiber.**
+**Inspect any object in a React Three Fiber scene: see the line of code that
+created it, and change its values in place.**
 
----
+Think of it as DevTools' "Inspect Element" for 3D. Press **Alt+Shift+C**, click
+a mesh, and a panel names the file, component and line it came from, with its
+props as editable fields. Press Enter, and the value is rewritten in your
+source and Vite hot-reloads it.
 
-## Introduction
+![The inspector panel for a box: the component and line it came from, its
+position, its geometry's args with one value followed to the constant it is
+declared as, and its material colour](docs/assets/inspector-panel.png)
 
-Developers working on Three.js and React Three Fiber scenes often spend significant time locating the exact application code responsible for rendered output. Complex scenes with hundreds of generated objects make this a tedious, manual process — there is no built-in way to click a rendered mesh and jump straight to the source that created it.
+## Quick start
 
-**Click-to-Source 3D** aims to bridge runtime rendering and source code by allowing developers to interact directly with rendered objects and trace them back to the source responsible for generating them. Think of it as the 3D equivalent of browser DevTools' "Inspect Element" — but for Three.js scenes.
+**You need** a React Three Fiber app served by Vite:
 
-Unlike DOM-focused click-to-source tools or general Three.js scene inspectors, this tool traces rendered objects back to the exact generator function and arguments that created them, not just their current runtime state.
-
-![The panel naming the file, function and line for a ground plane that carries
-no metadata in source](docs/assets/panel-stamped-only.png)
-
-*No metadata was written for this object. The build-time transform stamps every
-host element with its own source location, so clicking an untagged mesh still
-names the file, function and line that produced it.*
-
-![The panel resolving one tree inside a 120-instance InstancedMesh](docs/assets/panel-instanced.png)
-
-*One `InstancedMesh`, 120 trees. The panel resolves the individual instance you
-clicked and shows the transform that placed it. Instanced values are read-only,
-and the outline is mesh-wide, so every instance lights up. In the expanded
-details, `object.type` reads `Mesh`: three.js gives `InstancedMesh` no `type`
-string of its own, so the summary line above is what tells the two apart.*
-
-![The panel showing an editable argument with a Save button](docs/assets/panel-editable.png)
-
-*Where you have written `args` by hand, values become editable. Save rewrites
-the literal in your source and Vite hot-reloads.*
-
-## Goals
-
-- **Runtime Provenance** — Track which source code and parameters produced each rendered object.
-- **Interactive Source Tracing** — Click any object in a 3D scene and jump to its origin in your editor.
-- **Fast Debugging Workflow** — Eliminate guesswork when debugging procedural or generated geometry.
-- **Better AI Context** — Provide structured provenance data that AI tools can consume for smarter assistance.
-- **Developer Tooling** — Integrate seamlessly into existing Three.js and React Three Fiber workflows.
-
-## Current Status
-
-**Stage 7 — release.** Five packages at `0.1.4`, versioned in lockstep and
-verified by installing all five into a consumer outside this repository.
-What changed in each release is in [`CHANGELOG.md`](CHANGELOG.md).
-
-`0.1.x` is deliberate rather than modest: instanced provenance is read-only,
-scene addresses cannot detect a world regeneration, and the public API surface
-was curated for the first time immediately before release.
-
-Earlier stages are recorded in `docs/architecture/`, and the tags
-`stage5-complete` and `stage6-complete` mark verified checkpoints, each paired
-with the commit of the dogfooding consumer it was verified against.
-
-## Packages
-
-| package | what it is |
+| | version |
 |---|---|
-| `@click-to-source-3d/shared` | The `SourceRef` contract and protocol constants. Types, no runtime. |
-| `@click-to-source-3d/core` | Provenance resolution, down to the single instance of an `InstancedMesh`. Browser-pure. |
-| `@click-to-source-3d/overlay` | React Three Fiber components: selection, the trace panel, the bridge. |
-| `@click-to-source-3d/vite-plugin` | Dev-server endpoints, JSX source stamping, the scene bridge. |
-| `@click-to-source-3d/mcp` | An MCP server exposing the same provenance to coding agents. |
+| Node.js | 20.19 or later |
+| Vite | 6, 7 or 8 |
+| React Three Fiber | 9 |
+| three.js | 0.170 or later |
 
-## Scope — React Three Fiber only
-
-Source stamping is a JSX transform, the overlay is React, the bridge component
-needs the R3F tree, and the dev-server half needs Vite. Plain Three.js can use
-`@click-to-source-3d/core` with hand-written `userData.sourceRef` today.
-Automatic, untagged support for plain Three.js is planned for `0.2.0`; see the
-[Roadmap](#roadmap).
-
-## What it costs to adopt
-
-Two installs bring four packages, and four things go into your app: the plugin,
-a click handler — the only one of the four that is not a component — one
-component inside the `Canvas` and one outside it. The `Canvas` also takes an
-`onPointerMissed` prop, which is what clears the selection on an empty click.
-`<ClickToSourceBridge />` is a fifth, needed only for the agent tools in
-`@click-to-source-3d/mcp`; the example below includes it. Every feature is
-opt-in and dev-only: the plugin does nothing in a build, and the components
-render nothing in production. The next section is the working code.
-
-That is more wiring than a dev tool should ask for. `0.1.5` is planned to
-replace all of it with one command and no changes to your app code; see the
-[Roadmap](#roadmap).
-
-## Getting Started
-
-### 1. Install
+**1. Set it up.** In your app's folder, the one with `package.json` and
+`vite.config`, run:
 
 ```bash
-npm install @click-to-source-3d/overlay
+npx click-to-source-3d init
+```
+
+`npx` works whichever package manager your project uses. If you prefer, run
+`pnpm dlx click-to-source-3d init` or `bunx click-to-source-3d init` instead.
+
+`init` does three things, and prints each as it goes:
+
+- It installs `@click-to-source-3d/vite-plugin` as a dev dependency, using the
+  package manager your lockfile names (npm, pnpm, yarn or bun).
+- It adds `clickToSource()` to the `plugins` in your `vite.config`. Nothing
+  else in the file changes.
+- It asks whether to set up the tools for AI coding assistants. The answer
+  defaults to no; see [below](#for-ai-coding-assistants).
+
+Running it twice changes nothing. If it can't edit your config safely, it
+prints the two lines to add yourself; see
+[Setting it up by hand](#setting-it-up-by-hand).
+
+**2. Start your app** as usual:
+
+```bash
+npm run dev
+```
+
+**3. Inspect.** Open the app in your browser and press **Alt+Shift+C**, or
+click the round button in the bottom-right corner of the canvas. Then click
+any object.
+
+That is the whole setup. There is nothing to import, no component to mount
+and no tag to write.
+
+## What you get
+
+**Inspect mode.** Alt+Shift+C, or the button on the canvas, turns it on. Hover
+to see what is under the pointer and where it came from; click to open the
+panel. Clicks go to the inspector, not your app, but dragging still orbits the
+camera. Esc leaves inspect mode, and Esc again closes the panel.
+
+![Hovering the sphere in inspect mode shows its file and line](docs/assets/inspector-hover.png)
+
+**Where it came from.** The component and line that created the object, and an
+**Open** button that jumps to it in your editor.
+
+**Its values, editable.** Every literal prop on the element is listed, along
+with those on the geometry and material inside it: `position={[0, 1, 2]}`,
+`args={[1.2, 2, 1.2]}`, `color="#c2643c"`. A prop that names a constant
+declared in the same file — `args={[1.2, BOX_HEIGHT, 1.2]}` — is followed to
+the declaration and edited there. A computed value such as
+`noise(x, z) * 8` is shown as code but not editable. Edit a value and press
+Enter: the literal is rewritten in place, your formatting is untouched, and if
+the file has changed since, the edit is refused rather than landing on the
+wrong value.
+
+**One instance at a time.** Click one tree in an `InstancedMesh` of 120 and you
+get that tree: its position, scale and rotation, and a highlight around it
+alone.
+
+![One tree selected in a 120-instance InstancedMesh, with its transform](docs/assets/inspector-instance.png)
+
+**Nothing in production.** The plugin does nothing in a build. The inspector is
+added only to pages the dev server serves, so none of it reaches your users.
+
+## How it works
+
+- **At build time,** the Vite plugin gives every three.js element in your JSX
+  a small record of where it is: file, component, line and column, and each of
+  its literal props with its exact position. Your source files are not
+  changed; only the code Vite serves in development.
+- **In the page,** the plugin adds the inspector before your app loads. It
+  finds your renderers through three.js's own devtools hook, draws its
+  highlight after your frame rather than taking over the render loop (so
+  post-processing keeps working), and lives in a shadow root your CSS cannot
+  touch.
+- **On the dev server,** a few endpoints read files, rewrite a single literal,
+  and open your editor. They answer only to the page itself and to programs on
+  your machine, and only for source files inside the project.
+
+## For AI coding assistants
+
+Click-to-Source also gives AI coding assistants — Claude Code, Cursor, VS Code
+with Copilot, Windsurf and others that speak MCP — the same view of your scene.
+An assistant can list what is in the running scene, ask what is under a point
+on screen, read the code that made it, and change a value, which hot-reloads
+like any other edit.
+
+Answer yes when `init` asks, or skip the question:
+
+```bash
+npx click-to-source-3d init --mcp
+```
+
+That installs `@click-to-source-3d/mcp` and registers it in `.mcp.json` at
+the root of your repository. That file is Claude Code's, and Claude Code asks
+you to approve the server the first time it starts in the project.
+
+Other assistants keep their own config file. Add the same entry to it:
+
+| assistant | file | key |
+|---|---|---|
+| Claude Code | `.mcp.json` (written by `init`) | `mcpServers` |
+| Cursor | `.cursor/mcp.json` | `mcpServers` |
+| VS Code | `.vscode/mcp.json` | `servers` |
+
+```json
+{
+  "mcpServers": {
+    "click-to-source": { "command": "npx", "args": ["-y", "@click-to-source-3d/mcp"] }
+  }
+}
+```
+
+On Windows, start it through `cmd`:
+`"command": "cmd", "args": ["/c", "npx", "-y", "@click-to-source-3d/mcp"]`.
+
+There is nothing else to configure. The server finds your running dev server
+by itself, even when the dev server starts after the assistant does or on an
+unusual port. The tools that ask about the scene also need the app open in a
+visible browser tab. The [MCP package](packages/mcp/) lists the tools it
+offers.
+
+## Setting it up by hand
+
+This is everything `init` does. First, install the plugin as a dev
+dependency:
+
+```bash
 npm install -D @click-to-source-3d/vite-plugin
 ```
 
-`core` and `shared` arrive as dependencies. Add `@click-to-source-3d/mcp` if
-you want the agent tools.
+With another package manager, use `pnpm add -D`, `yarn add -D` or `bun add -d`
+instead.
 
-### 2. `vite.config.js`
+Then add it to `plugins` in your Vite config. It can go before or after
+`react()`:
 
 ```js
+// vite.config.js (or .ts)
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import { clickToSource } from '@click-to-source-3d/vite-plugin';
 
 export default defineConfig({
-  plugins: [
-    clickToSource({
-      stampSource: true, // stamp file/function/line into userData
-      bridge: true,      // let an agent query the running scene
-    }),
-    react(),
-  ],
+  plugins: [clickToSource(), react()],
 });
 ```
 
-Listing `clickToSource()` first is habit worth keeping, but with
-`@vitejs/plugin-react` either order stamps identically: that plugin performs no
-JSX transform of its own, so there is nothing for it to consume before this one
-runs. If stamping ever produces nothing, the plugin says so and names the fix.
+`clickToSource()` takes options to change the shortcut, hide the button, or
+turn parts off. The [plugin's README](packages/vite-plugin/) lists them.
 
-### 3. The JSX
+## Upgrading from 0.1.4 or earlier
 
-Two components go inside the `Canvas`, one goes outside it, and a `<group>`
-carries the click handler. Use `onClick`, not `onPointerUp`: R3F measures how
-far the pointer moved only for click events, and without that check a drag to
-orbit the camera that ends over a mesh selects it.
+1. **Update the plugin**, and the MCP server if you installed it:
 
-```jsx
-import { Canvas } from '@react-three/fiber';
-import {
-  useClickToSource,
-  useOverlayStore,
-  SelectionHighlight,
-  GenerationTrace,
-  ClickToSourceBridge,
-} from '@click-to-source-3d/overlay';
+   ```bash
+   npm install -D @click-to-source-3d/vite-plugin@latest
+   ```
 
-function Scene() {
-  const resolveClick = useClickToSource();
+   ```bash
+   npm install -D @click-to-source-3d/mcp@latest
+   ```
 
-  const handleClick = (e) => {
-    if (e.delta > 2) return; // a drag that ended over a mesh, not a click
-    e.stopPropagation();
-    const resolved = resolveClick(e);
-    if (resolved) {
-      useOverlayStore.getState().select(resolved);
-    } else {
-      useOverlayStore.getState().clearSelection();
-    }
-  };
+2. **Simplify the config.** `clickToSource({ stampSource: true, bridge: true })`
+   becomes `clickToSource()`, since both are now on by default.
+   `captureInstances` no longer does anything and can go.
 
-  return (
-    <>
-      <SelectionHighlight />
-      <group onClick={handleClick}>
-        {/* your scene */}
-      </group>
-    </>
-  );
-}
+3. **Remove the wiring.** You can delete the components you mounted by hand
+   (`<SelectionHighlight />`, `<GenerationTrace />` and
+   `<ClickToSourceBridge />`), the click handler and the `onPointerMissed`
+   that went with them, and then the overlay package itself:
 
-export default function App() {
-  const handlePointerMissed = () => {
-    useOverlayStore.getState().clearSelection();
-  };
+   ```bash
+   npm uninstall @click-to-source-3d/overlay
+   ```
 
-  return (
-    <>
-      <Canvas onPointerMissed={handlePointerMissed}>
-        <ClickToSourceBridge />
-        <Scene />
-      </Canvas>
+   They still work if you keep them, and the inspector stands aside for them
+   and says so once in the console.
 
-      {/* Outside the Canvas: GenerationTrace renders DOM, not scene objects */}
-      <GenerationTrace />
-    </>
-  );
-}
+4. **Drop the MCP environment variables.** `CTS_DEV_SERVER` and
+   `CTS_PROJECT_ROOT` are no longer needed, although they still override what
+   the server finds.
+
+Hand-written `userData.sourceRef` metadata is no longer needed for editable
+values. It still works, and still wins where you have it.
+
+## Troubleshooting
+
+**No button, and Alt+Shift+C does nothing.**
+- The inspector exists only on the dev server (`vite` or `npm run dev`), not
+  in `vite build` or `vite preview` output.
+- Check that `clickToSource()` is in `plugins`.
+- The button appears once a canvas has rendered.
+- In the browser console, `__CTS_DEVTOOLS__` should print an object. If it is
+  `undefined`, the plugin isn't running on this page; restart the dev server.
+
+**Alt+Shift+C is already taken.** Choose another shortcut:
+`clickToSource({ inspector: { hotkey: 'ctrl+shift+x' } })`.
+
+**Open starts the wrong editor.** Set the `LAUNCH_EDITOR` environment
+variable before starting the dev server, for example to `code`, `cursor` or
+`webstorm`.
+
+**An object shows "No source found".** It was created by a library component,
+such as drei's `<Box>`, or by code that isn't JSX. The panel names its parents
+so you can find the nearest element of yours.
+
+## Removing it
+
+Delete `clickToSource()` and its import from your Vite config, then
+uninstall the plugin:
+
+```bash
+npm uninstall @click-to-source-3d/vite-plugin
 ```
 
-`onPointerMissed` on the `Canvas` is what clears the selection when you click
-empty space.
+If you set up the assistant tools, also uninstall `@click-to-source-3d/mcp`
+and remove the `click-to-source` entry from `.mcp.json`.
 
-### 4. `InstancedMesh` needs its bounding volumes recomputed
+## Scope
 
-Raycasts test an instanced mesh's bounding volume before its instances. A mesh
-constructed before its matrices are written has a bounding volume that does not
-cover them, so clicks miss and the mesh appears to have no provenance at all.
+**React Three Fiber, served by Vite.** Plain three.js, with nothing tagged by
+hand, is the next milestone (`0.2.0`); webpack and Next.js are on the roadmap.
 
-After the placement loop, mark the matrices dirty and recompute:
+## Limits worth knowing
 
-```jsx
-function InstancedTreeMesh({ geometry, material, matrices }) {
-  const meshRef = useRef();
+**What counts as an element is a lowercase JSX tag.** `<mesh>`, `<group>`,
+`<instancedMesh>`, and wrappers such as `<animated.mesh>` are tracked. A
+component from a library — drei's `<Box>`, say — renders its own elements
+inside that library, so an object it makes resolves to the nearest element of
+yours around it, or to "no source found".
 
-  useEffect(() => {
-    if (!meshRef.current || !matrices?.length) return;
-    matrices.forEach((m, i) => meshRef.current.setMatrixAt(i, m));
-    meshRef.current.instanceMatrix.needsUpdate = true;
-    meshRef.current.computeBoundingBox();
-    meshRef.current.computeBoundingSphere();
-  }, [matrices]);
+**Editable means a literal.** A value computed at runtime, a prop passed in
+from a parent, or a constant imported from another file is shown but not
+editable. A constant declared in the same file is followed only when nothing
+else in the file has the same name.
 
-  if (!matrices?.length) return null;
+**An instance's placement is read-only.** It comes from whatever wrote its
+matrix, usually a loop with a random seed, so there is no single number in
+your source to change. The geometry, material and count are editable as usual.
 
-  return (
-    <instancedMesh
-      ref={meshRef}
-      args={[geometry, material, matrices.length]}
-      frustumCulled={false}
-    />
-  );
-}
-```
+**An instance's transform is all that is known about it.** Which colour
+group, species or variant it belongs to is not in a transform. Write
+`userData.instanceSourceRefs` by hand if you need that.
 
-Per-instance provenance needs nothing else. When you click an instance, its
-transform is read from the mesh itself, however the matrices were written.
+**Scene addresses do not detect a regenerated world.** They survive a remount,
+but if your world is rebuilt with different placements, the same address
+names a different object, and nothing says so.
 
-### 5. If you use `frameloop="demand"`
+**The page has to be visible for an assistant to ask about it.** Browsers stop
+rendering a background tab, and the scene answers only while it renders.
 
-`<SelectionHighlight />` draws through the render loop at `useFrame` priority 1,
-which makes R3F hand rendering over to it. Under `frameloop="demand"` it
-requests a frame whenever the selection changes, so it works.
+## Packages
 
-Under `frameloop="never"` it cannot — your application drives frames, so call
-`advance()` after changing the selection. It warns once in development rather
-than failing silently.
+Install one: the plugin, which `init` does for you.
 
-It also will not compose with other post-processing that claims a `useFrame`
-priority: whichever renders last wins and the other's output is discarded.
-
-## Limits worth knowing before you adopt it
-
-**Instanced provenance is read-only.** An instance's transform comes from
-whatever placed it, usually a seeded RNG, so there is no literal in your source
-to rewrite. The panel shows the values and refuses to edit them.
-
-**Variant-class values cannot be recovered.** An instance's transform holds
-`x`, `y`, `z`, `scale` and `yaw` — and nothing else. Which colour group,
-species or material variant an instance belongs to is not in it. The transform
-gives *placement*, not *classification*. Keep writing `instanceSourceRefs`
-arrays by hand if you need the classification.
-
-**Selection highlighting is mesh-wide for instanced meshes.** Clicking one
-instance outlines every instance in that `InstancedMesh`. Resolution is
-per-instance and correct; only the outline is coarse.
-
-**Scene addresses do not detect regeneration.** They are derived from source
-location, so they survive a remount — but if your world rebuilds with different
-placements, the same address resolves to a different object and nothing reports
-that it changed.
+| package | what it is |
+|---|---|
+| `@click-to-source-3d/vite-plugin` | **The one you install.** Stamping, the injected inspector, the dev-server endpoints, the bridge for assistants. |
+| `click-to-source-3d` | The `init` command. Run with `npx`; never added to your project. |
+| `@click-to-source-3d/mcp` | Optional. The MCP server for AI coding assistants. |
+| `@click-to-source-3d/core` | Internal: resolving an object to its source, picking, the highlight. Bundled into the plugin. |
+| `@click-to-source-3d/shared` | Internal: the types both halves agree on. |
+| `@click-to-source-3d/overlay` | **Legacy.** The React components from before the inspector was built in. Kept working for now; removed in a later release. |
 
 ## Roadmap
 
 | Stage | Milestone | Status |
 |-------|-----------|--------|
-| 0 | Scope freeze | done |
-| 1 | Prove the mechanism | done |
-| 2 | Provenance convention | done |
-| 3 | Core engine + overlay | done |
-| 4 | Dogfooding | done |
-| 5 | Package polish | done — `stage5-complete` |
-| 6 | MCP / agent mode | done — `stage6-complete` |
-| 6.5 | Auto-instrumentation | done — shipped as `stampSource`, no longer optional or research |
-| 7 | Ship | done — first release was `0.1.0`, not 1.0 |
-| 8 | One-command setup for R3F | next — `0.1.5` |
-| 9 | Plain Three.js, untagged | planned — `0.2.0` |
+| 0–6.5 | Proof, convention, engine, dogfooding, packaging, MCP, stamping | done |
+| 7 | Ship | done — first release `0.1.0` |
+| 8 | One command, no wiring, for R3F | done — `0.1.5` |
+| 9 | Plain three.js, nothing tagged | next — `0.2.0` |
 
-**Stage 8** makes the tool work as soon as it is installed. An
-`npx click-to-source-3d init` command adds the plugin to your Vite config; the
-plugin then injects the inspector itself, with a toggleable inspect mode, so
-there are no components to mount and no handler to write. It also detects which
-values on an element are editable, which replaces hand-written `sourceRef`
-metadata.
+**Stage 9** brings the inspector to plain three.js. Click a mesh and see the
+line that created it, the chain of calls that led there with the values they
+were called with, and the helpers they used, such as a noise function. A
+prototype of the transform behind it already works on untagged code. `0.2.0`
+will be the first version to support both three.js and React Three Fiber.
 
-**Stage 9** brings the same experience to plain Three.js, with nothing tagged
-by hand. Click a mesh and see the line that created it, the chain of
-generator calls that led there with the values they were called with, and the
-functions they used, such as a noise function. A prototype of the transform
-behind it already works on untagged code. `0.2.0` will be the first version to
-support both Three.js and React Three Fiber.
-
-The 1.0 in the original plan was optimistic. This released at `0.1.0`: the API
-surface has only just been curated deliberately, instanced provenance is
-read-only, and there is no staleness detection for scene addresses. `0.x` says
-that honestly.
-
-For the original plan, see [`docs/roadmap/`](docs/roadmap/).
-
-## `<ClickToSourceBridge />` and background tabs
-
-The bridge answers queries about the running scene, and must be inside the
-`Canvas`, since only a component in the R3F tree can supply a scene and a
-camera.
-
-It answers only while the page is actually rendering. R3F does not render
-`Canvas` children in a hidden or background tab, so the component never mounts
-and every bridge query reports `disconnected` — indistinguishable from no page
-being open. This matters when driving the app headlessly: keep the page
-visible, or expect `disconnected`.
+The full plan is in
+[`docs/roadmap/`](docs/roadmap/Click-to-Source_Implementation_Plan_0.1.5-0.2.0.pdf),
+and what changed in each release is in [`CHANGELOG.md`](CHANGELOG.md).
 
 ## Repository Structure
 
 ```
 click-to-source/
-│
-├── docs/                        # Project documentation
-│   ├── architecture/            # Architecture decisions and design docs
-│   ├── research/                # Research and competitor analysis
-│   ├── tech-stack/              # Technology stack documentation
-│   ├── roadmap/                 # Project roadmap and milestones
-│   └── assets/                  # Documentation assets (diagrams, images)
-│
-├── packages/                    # Monorepo packages (npm workspaces)
-│   ├── shared/                  # SourceRef contract and protocol constants
-│   ├── core/                    # Provenance resolution, instance capture
-│   ├── overlay/                 # React Three Fiber inspection components
-│   ├── vite-plugin/             # Dev-server endpoints, stamping, bridge
-│   ├── mcp/                     # MCP server for coding agents
-│   └── examples/                # Example projects and demos
-│
-├── scripts/                     # Build, release, and development scripts
-│
-├── .github/                     # GitHub configuration
-│   ├── ISSUE_TEMPLATE/          # Issue templates
-│   ├── workflows/               # CI/CD workflows
-│   └── pull_request_template.md # PR template
-│
-└── .vscode/                     # Editor configuration
+├── packages/
+│   ├── vite-plugin/   # the plugin: stamping, injected inspector, endpoints
+│   ├── cli/           # npx click-to-source-3d init
+│   ├── mcp/           # MCP server for AI coding assistants
+│   ├── core/          # resolution, picking, highlight (bundled into the plugin)
+│   ├── shared/        # types shared by both halves
+│   ├── overlay/       # legacy React components
+│   └── examples/      # a plain R3F scene with only the plugin added
+├── e2e/               # browser tests against the example
+└── docs/              # architecture notes, research, roadmap
 ```
-
-## Documentation
-
-Detailed project documentation is available in the [`docs/`](docs/) directory:
-
-- **[Architecture](docs/architecture/)** — System design and architectural decisions.
-  - [`metadata-convention.pdf`](docs/architecture/metadata-convention.pdf) — Permanent architectural contract and canonical SourceRef tagging convention.
-  - [`future-auto-instrumentation-design.md`](docs/architecture/future-auto-instrumentation-design.md) — Future design document for automatic instrumentation.
-  - [`Stage2_Architectural_Validation_Report.pdf`](docs/architecture/Stage2_Architectural_Validation_Report.pdf) — Stage 2 architectural validation report.
-- **[Research](docs/research/)** — Technical approaches, competitor analysis, and experimental validation.
-  - [`Click-to-Source_Technical_Approaches.pdf`](docs/research/Click-to-Source_Technical_Approaches.pdf) — Technical approach analysis.
-  - [`Stage1_Experimental_Report.pdf`](docs/research/Stage1_Experimental_Report.pdf) — Stage 1 experimental validation report.
-- **[Tech Stack](docs/tech-stack/)** — Technology choices and rationale.
-- **[Roadmap](docs/roadmap/)** — Detailed project roadmap and milestones.
 
 ## Contributing
 

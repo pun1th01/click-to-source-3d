@@ -1,30 +1,20 @@
 import React, { useEffect, useRef } from "react";
 import { createRoot } from "react-dom/client";
 import * as THREE from "three";
-import { Canvas, ThreeEvent, useFrame, useThree } from "@react-three/fiber";
-import {
-  useClickToSource,
-  useOverlayStore,
-  SelectionHighlight,
-  GenerationTrace,
-  ClickToSourceBridge,
-} from "@click-to-source-3d/overlay";
+import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 
-// ─── Editable parameters ───────────────────────────────────────────────────
+// ─── A plain React Three Fiber scene ───────────────────────────────────────
 //
-// These two exist to demonstrate the edit path: click the box or the sphere,
-// change the value in the panel, press Save, and the plugin rewrites the
-// literal below through its AST editor. Vite hot-reloads and the shape
-// changes on screen.
+// Nothing in this file mentions click-to-source. The plugin in vite.config.ts
+// is the whole setup: run `npm run dev`, press Alt+Shift+C (or the button in
+// the corner of the canvas), and click anything.
 //
-// The `line:` in each sourceRef further down must name the line its constant
-// is declared on — that is the location the editor matches against, and it is
-// not the line the mesh sits on. Keeping both constants here, near the top,
-// is what stops the two drifting apart when the scene below is edited.
-//
-const BOX_HEIGHT = 1.4; // line 26 — referenced by the box's sourceRef
-const SPHERE_RADIUS = 0.6; // line 27 — referenced by the sphere's sourceRef
+// The constants below show a value being followed to its declaration: click
+// the box, change "BOX_HEIGHT" in the panel, press Enter, and this line is
+// rewritten and the box hot-reloads.
+const BOX_HEIGHT = 1.4;
+const SPHERE_RADIUS = 0.6;
 
 const TREE_COUNT = 120;
 
@@ -39,18 +29,9 @@ function mulberry32(seed: number) {
 }
 
 /**
- * One InstancedMesh, many trees, each with its own provenance.
- *
- * Placed the way the three.js docs place instances: one shared dummy, its
- * matrix handed straight to setMatrixAt on every iteration. There is no
- * object per instance for the resolver to read, so clicking a tree reads that
- * instance's transform back out of the mesh.
- *
- * The bounding volumes are recomputed afterwards, and that part is
- * load-bearing. A raycast tests an instanced mesh's bounds before its
- * instances, and a mesh built before its matrices were written has bounds
- * that do not cover them: clicks miss entirely and the trees look like they
- * have no provenance.
+ * One InstancedMesh, many trees. Placed the way the three.js docs place
+ * instances: one shared dummy, its matrix handed to setMatrixAt each time.
+ * Clicking a tree in the inspector shows that one tree's transform.
  */
 function InstancedTrees() {
   const meshRef = useRef<THREE.InstancedMesh>(null);
@@ -71,10 +52,12 @@ function InstancedTrees() {
     }
 
     mesh.instanceMatrix.needsUpdate = true;
-    mesh.computeBoundingBox();
-    mesh.computeBoundingSphere();
   }, []);
 
+  // frustumCulled off because the trees are placed after the mesh first
+  // renders: culled against bounds computed before placement, they could
+  // vanish. That is three's behaviour, not the inspector's — the inspector
+  // picks instances correctly either way.
   return (
     <instancedMesh
       ref={meshRef}
@@ -88,86 +71,36 @@ function InstancedTrees() {
 }
 
 function Scene() {
-  const resolveClick = useClickToSource();
-
-  // onClick rather than onPointerUp: R3F measures pointer travel only for
-  // click events, so this is the only place a drag to orbit the camera can be
-  // told apart from a pick.
-  const handleClick = (event: ThreeEvent<MouseEvent>) => {
-    if (event.delta > 2) return;
-    event.stopPropagation();
-    const resolved = resolveClick(event);
-
-    if (resolved) {
-      useOverlayStore.getState().select(resolved);
-    } else {
-      useOverlayStore.getState().clearSelection();
-    }
-  };
-
   return (
     <>
-      <SelectionHighlight />
       <SceneOrbitControls />
 
       <ambientLight intensity={Math.PI / 3} />
       <directionalLight position={[10, 20, 8]} intensity={2} />
 
-      <group onClick={handleClick}>
-        <InstancedTrees />
+      <InstancedTrees />
 
-        {/* Ground. Stamped automatically — click it and the panel names this
-            file, this function and this line, with no metadata written by
-            hand. That is what `stampSource: true` buys on its own. */}
-        <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.01, 0]}>
-          <planeGeometry args={[60, 60]} />
-          <meshStandardMaterial color="#2b2f3a" />
-        </mesh>
+      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.01, 0]}>
+        <planeGeometry args={[60, 60]} />
+        <meshStandardMaterial color="#2b2f3a" />
+      </mesh>
 
-        {/* The two editable meshes. `args` is written by hand because a stamp
-            knows where a call site is, not which of its values are worth
-            editing; file, function and line come from `line:` below, which
-            points at the constant rather than at this element. `argSources`
-            maps the panel's display key onto the identifier in source. */}
-        <mesh
-          position={[-2.2, BOX_HEIGHT / 2, 6]}
-          userData={{
-            sourceRef: {
-              file: "src/main.tsx",
-              function: "Scene",
-              line: 26,
-              args: { height: BOX_HEIGHT },
-              argSources: { height: "BOX_HEIGHT" },
-            },
-          }}
-        >
-          <boxGeometry args={[1.2, BOX_HEIGHT, 1.2]} />
-          <meshStandardMaterial color="#c2643c" />
-        </mesh>
+      <mesh position={[-2.2, BOX_HEIGHT / 2, 6]}>
+        <boxGeometry args={[1.2, BOX_HEIGHT, 1.2]} />
+        <meshStandardMaterial color="#c2643c" />
+      </mesh>
 
-        <mesh
-          position={[2.2, SPHERE_RADIUS, 6]}
-          userData={{
-            sourceRef: {
-              file: "src/main.tsx",
-              function: "Scene",
-              line: 27,
-              args: { radius: SPHERE_RADIUS },
-              argSources: { radius: "SPHERE_RADIUS" },
-            },
-          }}
-        >
-          <sphereGeometry args={[SPHERE_RADIUS, 32, 32]} />
-          <meshStandardMaterial color="#4a86c8" />
-        </mesh>
-      </group>
+      <mesh position={[2.2, SPHERE_RADIUS, 6]}>
+        <sphereGeometry args={[SPHERE_RADIUS, 32, 32]} />
+        <meshStandardMaterial color="#4a86c8" roughness={0.4} />
+      </mesh>
     </>
   );
 }
 
 /**
  * OrbitControls straight from three's examples, so this demo needs no
- * dependency beyond the ones the tool itself brings.
+ * dependency beyond R3F.
  */
 function SceneOrbitControls() {
   const { camera, gl } = useThree();
@@ -189,30 +122,13 @@ function SceneOrbitControls() {
 }
 
 function App() {
-  const handlePointerMissed = () => {
-    useOverlayStore.getState().clearSelection();
-  };
-
   return (
-    <>
-      <Canvas
-        camera={{ position: [0, 6, 18], fov: 50 }}
-        onPointerMissed={handlePointerMissed}
-      >
-        {/* Without a scene background the canvas is transparent, and
-            everything above the ground plane shows the white page through it,
-            which reads as a rendering fault rather than an empty sky. */}
-        <color attach="background" args={["#1a1d26"]} />
-
-        {/* Inside the Canvas: the bridge needs a scene and a camera, which
-            only a component in the R3F tree can supply. */}
-        <ClickToSourceBridge />
-        <Scene />
-      </Canvas>
-
-      {/* Outside the Canvas: GenerationTrace renders DOM, not scene objects. */}
-      <GenerationTrace />
-    </>
+    <Canvas camera={{ position: [0, 6, 18], fov: 50 }}>
+      {/* Without a scene background the canvas is transparent, and
+          everything above the ground shows the white page through it. */}
+      <color attach="background" args={["#1a1d26"]} />
+      <Scene />
+    </Canvas>
   );
 }
 

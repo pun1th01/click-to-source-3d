@@ -17,24 +17,41 @@ npm test
 `npm run build --workspaces`, which builds alphabetically and fails on a
 clean clone because the example imports the Vite plugin from its `dist`.
 
-To try a change in the browser:
+To try a change in the browser, run the example and press Alt+Shift+C:
 
 ```bash
 npm run dev -w @click-to-source-3d/examples
+```
+
+The end-to-end tests drive the example in a real browser. Locally, use an
+installed one rather than downloading Chromium:
+
+```bash
+CTS_E2E_CHANNEL=msedge npm run test:e2e
 ```
 
 ## Where things live
 
 | package | what it is |
 |---|---|
-| `packages/shared` | Types and protocol constants shared by both halves |
-| `packages/core` | Provenance resolution and the bridge's browser half |
-| `packages/overlay` | React Three Fiber components |
-| `packages/vite-plugin` | Source stamping, the dev-server endpoints, the bridge hub |
+| `packages/vite-plugin` | Stamping, the injected inspector (`src/client`), the endpoints, the bridge hub |
+| `packages/cli` | `npx click-to-source-3d init` |
 | `packages/mcp` | The MCP server for coding agents |
-| `packages/examples` | The demo app, used to check changes by hand |
+| `packages/core` | Resolution, picking, the highlight, the bridge's browser half |
+| `packages/shared` | Types and protocol constants shared by both halves |
+| `packages/overlay` | Legacy React components |
+| `packages/examples` | A plain R3F scene with only the plugin added |
+| `e2e` | Playwright tests against the example |
 
 Design notes for earlier stages are in `docs/architecture/`.
+
+## Two things this repository cannot show you
+
+Inside this repository the plugin is a workspace symlink, which Vite treats
+as source code. In a real project it sits in `node_modules`, and two bugs in
+0.1.5 appeared only there. Before a release that touches the plugin or the
+inspector, pack the packages, install them into a fresh `create-vite` app
+under npm and pnpm, run `init`, and check the console.
 
 ## Pull requests
 
@@ -43,8 +60,8 @@ Design notes for earlier stages are in `docs/architecture/`.
   has to exercise the real path.
 - **Changes that affect users get a `CHANGELOG.md` entry** under the next
   version: what was wrong, what it does now, and anything a user has to do.
-- **The five published packages are versioned in lockstep.** Don't bump
-  versions in a pull request; that happens at release.
+- **The published packages are versioned in lockstep.** Don't bump versions
+  in a pull request; that happens at release.
 - **Keep the endpoints' caller policy in one place.** Anything that reads or
   writes files, or answers questions about the scene, goes through
   `checkCaller` in `packages/vite-plugin/src/middleware.ts`.

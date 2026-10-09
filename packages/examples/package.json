@@ -10,15 +10,14 @@
     "build": "vite build"
   },
   "dependencies": {
-    "@click-to-source-3d/core": "*",
-    "@click-to-source-3d/overlay": "*",
-    "@click-to-source-3d/shared": "*",
-    "@click-to-source-3d/vite-plugin": "*",
     "@react-three/fiber": "^9.7.0",
     "@vitejs/plugin-react": "^6.0.5",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
     "three": "^0.170.0",
     "vite": "^8.2.1"
+  },
+  "devDependencies": {
+    "@click-to-source-3d/vite-plugin": "*"
   }
 }
