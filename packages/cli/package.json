@@ -1,0 +1,48 @@
+{
+  "name": "click-to-source-3d",
+  "version": "0.1.4",
+  "description": "Set up Click-to-Source 3D in a Vite + React Three Fiber project with one command",
+  "keywords": [
+    "threejs",
+    "react-three-fiber",
+    "r3f",
+    "vite",
+    "devtools",
+    "inspector"
+  ],
+  "license": "MIT",
+  "type": "module",
+  "bin": {
+    "click-to-source-3d": "dist/bin.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/pun1th01/click-to-source-3d.git",
+    "directory": "packages/cli"
+  },
+  "engines": {
+    "node": ">=20.19.0"
+  },
+  "scripts": {
+    "clean": "node -e \"const f=require('fs');f.rmSync('dist',{recursive:true,force:true});f.rmSync('tsconfig.tsbuildinfo',{force:true})\"",
+    "build": "tsc -b",
+    "prepack": "npm run clean && tsc -b",
+    "prepublishOnly": "npm run test",
+    "pretest": "tsc -b",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "@types/node": "^26.2.0",
+    "vitest": "^4.1.11"
+  },
+  "dependencies": {
+    "@babel/parser": "^7.29.9",
+    "magic-string": "^0.30.21"
+  }
+}
