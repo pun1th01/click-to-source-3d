@@ -5,27 +5,50 @@ source declares and what the running app actually built.
 
 Part of [Click-to-Source 3D](https://github.com/pun1th01/click-to-source-3d).
 
+## What MCP is
+
+MCP, the Model Context Protocol, is how AI coding assistants — Claude Code,
+Cursor, VS Code with Copilot, Windsurf and others — use tools that other
+programs provide. This package is one such program: the assistant starts it in
+the background and calls its tools, which talk to your Vite dev server and,
+through it, to your app open in the browser.
+
 ## Scope
 
-**React Three Fiber, behind a Vite dev server.** The file tools read your
-project through
-[`@click-to-source-3d/vite-plugin`](https://www.npmjs.com/package/@click-to-source-3d/vite-plugin);
-the scene tools need the app open in a browser with `bridge: true` and
-`<ClickToSourceBridge />` mounted.
+**React Three Fiber, behind a Vite dev server** running
+[`@click-to-source-3d/vite-plugin`](https://www.npmjs.com/package/@click-to-source-3d/vite-plugin).
+The scene tools also need the app open in a visible browser tab.
 
 ## Install
 
-    npm install -D @click-to-source-3d/mcp
+    npx click-to-source-3d init --mcp
 
-Register the binary with your MCP client:
+That installs this package and registers it in `.mcp.json` at the root of
+your repository. That file is Claude Code's, and Claude Code asks you to
+approve the server the first time it starts in the project.
+
+For another assistant, add the same entry to its own config file:
+
+| assistant | file | key |
+|---|---|---|
+| Claude Code | `.mcp.json` | `mcpServers` |
+| Cursor | `.cursor/mcp.json` | `mcpServers` |
+| VS Code | `.vscode/mcp.json` | `servers` |
 
     {
-      "command": "click-to-source-mcp",
-      "env": {
-        "CTS_DEV_SERVER": "http://localhost:5173",
-        "CTS_PROJECT_ROOT": "/path/to/your/app"
+      "mcpServers": {
+        "click-to-source": { "command": "npx", "args": ["-y", "@click-to-source-3d/mcp"] }
       }
     }
+
+On Windows, wrap the command: `"command": "cmd", "args": ["/c", "npx", "-y", "@click-to-source-3d/mcp"]`.
+
+There is nothing to configure. When the dev server starts, the plugin
+announces its address and project root, and this server reads that on every
+call — so it works even if the dev server starts after the assistant does, or
+on another port than usual. In a monorepo it picks the dev server whose
+project is closest to where the assistant was started. `CTS_DEV_SERVER` and
+`CTS_PROJECT_ROOT` still override it.
 
 ## Tools
 

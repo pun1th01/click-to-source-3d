@@ -12,7 +12,7 @@ import { postJson, type DevServerOptions } from "./devServer.js";
  * timeout, because the remedy differs for each and an agent can only act on
  * a stated one:
  *
- *   disabled      bridge: true was never passed. Configuration, not runtime.
+ *   disabled      the plugin was given bridge: false. Configuration, not runtime.
  *   disconnected  no page attached. Open the app. A full reload passes
  *                 through this state for ~23ms, measured, because the socket
  *                 close is observed before the replacement connects.

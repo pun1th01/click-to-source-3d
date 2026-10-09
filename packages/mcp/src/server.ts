@@ -16,6 +16,7 @@ import {
   DevServerTimeoutError,
   DevServerUnreachableError,
 } from "./devServer.js";
+import { findDevServer } from "./discovery.js";
 import {
   editParameterTool,
   getSource,
@@ -25,10 +26,24 @@ import {
   type ToolContext,
 } from "./tools.js";
 
-const context: ToolContext = {
-  origin: process.env.CTS_DEV_SERVER ?? "http://localhost:5173",
-  root: process.env.CTS_PROJECT_ROOT ?? process.cwd(),
-};
+/**
+ * Where the dev server is and which project it serves, worked out on every
+ * call rather than once at startup: an assistant usually starts this server
+ * before the developer runs `npm run dev`, and Vite may land on another port
+ * than the one it landed on last time.
+ *
+ * The environment variables, when set, win. Otherwise the dev server's own
+ * announcement is used, and failing that the Vite default, which produces
+ * the "no dev server reachable" error with its remedy.
+ */
+function currentContext(): ToolContext {
+  const announced = process.env.CTS_DEV_SERVER ? null : findDevServer(process.cwd());
+
+  return {
+    origin: process.env.CTS_DEV_SERVER ?? announced?.origin ?? "http://localhost:5173",
+    root: process.env.CTS_PROJECT_ROOT ?? announced?.root ?? process.cwd(),
+  };
+}
 
 const TOOLS = [
   {
@@ -127,10 +142,11 @@ const TOOLS = [
     name: "resolve_at_point",
     description:
       "Resolve whatever is under a point in the RUNNING scene. Coordinates are " +
-      "normalised device coordinates, -1 to 1. Needs the app open in a browser " +
-      "with bridge: true and <ClickToSourceBridge /> in the Canvas. Reports " +
-      "disconnected, no_scene, ambiguous or timeout rather than failing " +
-      "silently — each has a different remedy.",
+      "normalised device coordinates, -1 to 1. Needs the dev server running and " +
+      "the app open in a visible browser tab; nothing else to set up. The answer " +
+      "includes the object's editable props, each with its exact line and " +
+      "column. Reports disconnected, no_scene, ambiguous or timeout rather than " +
+      "failing silently — each has a different remedy.",
     inputSchema: {
       type: "object",
       properties: {
@@ -208,6 +224,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: TOOLS }))
 
 server.setRequestHandler(CallToolRequestSchema, async (request) => {
   const args = (request.params.arguments ?? {}) as Record<string, never>;
+  const context = currentContext();
 
   try {
     let result: unknown;
