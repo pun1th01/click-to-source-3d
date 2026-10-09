@@ -70,6 +70,15 @@ export function startDevtools(setup: {
       setBridgeScene(attached);
     };
     discovery.onView(sync);
+    // three announces a renderer from its constructor, before R3F has given
+    // the root a camera, so the first sync usually finds nothing. Until one
+    // succeeds, try again after every frame: an assistant asking right after
+    // a reload would otherwise be told there is no scene for up to a second.
+    discovery.onFrame(() => {
+      if (!attached) {
+        sync();
+      }
+    });
     setInterval(sync, 1000);
   }
 

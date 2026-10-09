@@ -135,6 +135,7 @@ export class View {
 export class Discovery {
   private readonly views = new Map<THREE.WebGLRenderer, View>();
   private readonly listeners = new Set<(view: View) => void>();
+  private readonly frameListeners = new Set<(view: View) => void>();
 
   constructor(private readonly roots: R3FRoots) {}
 
@@ -169,6 +170,11 @@ export class Discovery {
     this.listeners.add(listener);
   }
 
+  /** Called after every frame any view draws, so a listener has to be cheap. */
+  onFrame(listener: (view: View) => void): void {
+    this.frameListeners.add(listener);
+  }
+
   private add(renderer: THREE.WebGLRenderer): void {
     const canvas = renderer.domElement;
 
@@ -186,9 +192,14 @@ export class Discovery {
     attachHighlight(renderer, view.layer, () => view.camera());
 
     const render = renderer.render;
+    const frameListeners = this.frameListeners;
     renderer.render = function (this: THREE.WebGLRenderer, scene, camera) {
       view.frame(scene, camera);
-      return render.call(this, scene, camera);
+      const result = render.call(this, scene, camera);
+      for (const listener of frameListeners) {
+        listener(view);
+      }
+      return result;
     } as typeof renderer.render;
 
     this.views.set(renderer, view);

@@ -134,6 +134,9 @@ the current three.js, R3F and Vite, under npm and under pnpm 12.
 - End-to-end tests with Playwright drive the example as a developer would:
   the hotkey, a click, an edit surviving the reload, the Open request, and an
   MCP server answering with no configuration. They run in CI on Chromium.
+  Their first CI run caught a bug: an assistant asking in the first second
+  after a page load was told there was no scene. The scene now reaches the
+  bridge on the first frame.
 - The README's screenshots are taken from the example by a Playwright script.
 - The root package is renamed `click-to-source-3d-monorepo`, freeing the name
   for the CLI.
