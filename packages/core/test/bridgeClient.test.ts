@@ -213,3 +213,46 @@ describe("answerBridgeQuery, against a real scene", () => {
     });
   });
 });
+
+describe("connectBridgeOverHot", () => {
+  /** Enough of import.meta.hot to drive the bridge as Vite would. */
+  function fakeHot() {
+    const sent: Array<{ event: string; data: unknown }> = [];
+    const listeners = new Map<string, Array<(data: never) => void>>();
+    return {
+      sent,
+      hot: {
+        send: (event: string, data?: unknown) => sent.push({ event, data }),
+        on: (event: string, listener: (data: never) => void) =>
+          listeners.set(event, [...(listeners.get(event) ?? []), listener]),
+        off: (event: string, listener: (data: never) => void) =>
+          listeners.set(event, (listeners.get(event) ?? []).filter((l) => l !== listener)),
+      },
+      emit: (event: string, data?: unknown) =>
+        (listeners.get(event) ?? []).forEach((l) => l(data as never)),
+    };
+  }
+
+  it("says hello, answers a query, and says hello again on reconnect", async () => {
+    const { connectBridgeOverHot } = await import("../src/bridgeClient.js");
+    const { hot, sent, emit } = fakeHot();
+    sceneWith(stamped(new THREE.Mesh(new THREE.BoxGeometry()), 7, "Rock"));
+
+    const disconnect = connectBridgeOverHot(hot);
+    expect(sent[0].event).toBe("cts:bridge:hello");
+
+    emit("cts:bridge:query", { requestId: "q1", query: { kind: "list_scene_provenance" } });
+    expect(sent[1]).toMatchObject({
+      event: "cts:bridge:reply",
+      data: { requestId: "q1", result: { status: "ready" } },
+    });
+
+    // After a dev-server restart the server has forgotten the page.
+    emit("vite:ws:connect");
+    expect(sent[2].event).toBe("cts:bridge:hello");
+
+    disconnect();
+    emit("cts:bridge:query", { requestId: "q2", query: { kind: "list_scene_provenance" } });
+    expect(sent).toHaveLength(3);
+  });
+});

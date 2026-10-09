@@ -3,6 +3,12 @@
   "version": "0.1.4",
   "description": "Core provenance engine for Click-to-Source 3D",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/pun1th01/click-to-source-3d.git",
+    "directory": "packages/core"
+  },
+  "homepage": "https://github.com/pun1th01/click-to-source-3d#readme",
   "type": "module",
   "exports": {
     ".": {
@@ -16,6 +22,10 @@
     "./bridge": {
       "types": "./dist/bridge.d.ts",
       "default": "./dist/bridge.js"
+    },
+    "./devtools": {
+      "types": "./dist/devtools.d.ts",
+      "default": "./dist/devtools.js"
     },
     "./package.json": "./package.json"
   },

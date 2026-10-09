@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import type { SourceEditFetch } from "../src/sourceEditClient";
-import { editSourceFile } from "../src/sourceEditClient";
+import type { SourceEditFetch } from "../src/sourceEditClient.js";
+import { editSourceFile } from "../src/sourceEditClient.js";
 
 function jsonResponse(body: unknown, status = 200) {
   return {

@@ -1,10 +1,6 @@
-import React, { useEffect, useMemo } from "react";
-import { useFrame, useThree } from "@react-three/fiber";
-import * as THREE from "three";
-import { EffectComposer } from "three/examples/jsm/postprocessing/EffectComposer.js";
-import { RenderPass } from "three/examples/jsm/postprocessing/RenderPass.js";
-import { OutlinePass } from "three/examples/jsm/postprocessing/OutlinePass.js";
-import { OutputPass } from "three/examples/jsm/postprocessing/OutputPass.js";
+import React, { useEffect, useMemo, useRef } from "react";
+import { useThree } from "@react-three/fiber";
+import { attachHighlight, HighlightLayer } from "@click-to-source-3d/core/devtools";
 import { useOverlayStore } from "../store/overlayStore.js";
 import { DEV } from "../env.js";
 
@@ -25,93 +21,64 @@ function warnOnce(key: string, message: string): void {
 }
 
 /**
- * Outlines the selected object. Renders nothing in a production build.
+ * Highlights the selected object. Renders nothing in a production build.
  */
 export function SelectionHighlight() {
-  return DEV ? <SelectionOutline /> : null;
+  return DEV ? <SelectionBox /> : null;
 }
 
 /**
- * Outlines the selected object.
+ * Draws a box around the selected object — or, for an InstancedMesh, around
+ * the one instance that was clicked — after each frame R3F renders.
  *
- * Must be rendered inside the Canvas, and it takes over rendering: the
- * useFrame below runs at priority 1, and any priority above 0 makes R3F stop
- * rendering the scene itself and hand the job to the subscriber. Two
- * consequences a consumer needs to know about, neither of which is obvious
- * from the outside:
+ * It used to be an OutlinePass driven from useFrame at priority 1, which made
+ * R3F hand it the whole render loop. That fought any other post-processing
+ * for the loop, and its render target had no multisampling, so the app lost
+ * antialiasing while anything was selected. It also outlined every instance
+ * of an instanced mesh, since an outline pass only knows whole objects.
  *
- * It will not compose with other post-processing that also claims a priority
- * — whichever renders last wins, and the other's output is discarded.
+ * Now it shares the injected inspector's highlight: a separate pass drawn
+ * after the application's own frame, which leaves the render loop alone.
  *
- * Under `frameloop="demand"` a frame only runs when something asks for one.
- * Selection arrives from a store outside R3F, which does not ask, so the
- * outline would never appear and nothing would report why. That is what the
- * invalidate() call below exists for; it was a real silent failure, not a
- * hypothetical.
+ * Under frameloop="demand" a frame only runs when something asks for one.
+ * The selection arrives from a store R3F does not observe, so the effect
+ * below asks; without it the box would never appear and nothing would say
+ * why.
  */
-function SelectionOutline() {
-  const { gl, scene, camera, size, invalidate, frameloop } = useThree();
+function SelectionBox() {
+  const gl = useThree((state) => state.gl);
+  const camera = useThree((state) => state.camera);
+  const invalidate = useThree((state) => state.invalidate);
+  const frameloop = useThree((state) => state.frameloop);
   const selectedObject = useOverlayStore((state) => state.selectedObject);
+  const instanceId = useOverlayStore((state) => state.instanceId);
 
-  const { composer, outlinePass } = useMemo(() => {
-    const composer = new EffectComposer(gl);
-    const renderPass = new RenderPass(scene, camera);
-    composer.addPass(renderPass);
+  // Read when each frame is drawn, so a camera swapped by the application is
+  // followed without re-attaching.
+  const cameraRef = useRef(camera);
+  cameraRef.current = camera;
 
-    const outlinePass = new OutlinePass(
-      new THREE.Vector2(size.width, size.height),
-      scene,
-      camera
-    );
-    
-    // Sensible minimal defaults for OutlinePass
-    outlinePass.edgeStrength = 5;
-    outlinePass.edgeGlow = 1;
-    outlinePass.edgeThickness = 2;
-    outlinePass.visibleEdgeColor.set("#00ff00"); // Green for visible
-    outlinePass.hiddenEdgeColor.set("#00aa00");  // Darker green for hidden edges
-    
-    composer.addPass(outlinePass);
+  const layer = useMemo(() => new HighlightLayer(), []);
 
-    const outputPass = new OutputPass();
-    composer.addPass(outputPass);
-
-    return { composer, outlinePass };
-  }, [gl, scene, camera]); // Intentionally not including 'size' to avoid recreation on resize
-
-  // Handle resize
   useEffect(() => {
-    // Both composer and outlinePass need to be informed of size changes
-    const pixelRatio = gl.getPixelRatio();
-    composer.setSize(size.width, size.height);
-    composer.setPixelRatio(pixelRatio);
-    // OutlinePass takes raw width/height, often adjusted for pixel ratio internally but usually just the same size as composer is fine.
-    // three.js OutlinePass sometimes requires explicit setSize with logical resolution.
-    outlinePass.setSize(size.width, size.height);
-  }, [composer, outlinePass, size, gl]);
-
-  // Handle selection updates
-  useEffect(() => {
-    if (selectedObject) {
-      outlinePass.selectedObjects = [selectedObject];
-    } else {
-      outlinePass.selectedObjects = [];
-    }
-
-    // Ask for a frame. Under frameloop="demand" nothing else will: the
-    // selection came from a store R3F does not observe, so without this the
-    // outline changes only if some other cause happens to schedule a frame.
-    invalidate();
-  }, [selectedObject, outlinePass, invalidate]);
-
-  // The failure this component shipped with was silent — no error, no
-  // warning, an overlay that simply did not draw. Dev-only, and only for the
-  // cases invalidate() cannot rescue.
-  useEffect(() => {
-    if (!DEV) {
+    if (!gl) {
       return;
     }
+    const detach = attachHighlight(gl, layer, () => cameraRef.current);
+    return () => {
+      detach();
+    };
+  }, [gl, layer]);
 
+  useEffect(() => () => layer.dispose(), [layer]);
+
+  useEffect(() => {
+    layer.set("selected", selectedObject ? { object: selectedObject, instanceId } : null);
+    invalidate();
+  }, [selectedObject, instanceId, layer, invalidate]);
+
+  // Dev-only, and only for the cases invalidate() cannot rescue.
+  useEffect(() => {
     if (!gl) {
       warnOnce(
         "no-renderer",
@@ -125,51 +92,12 @@ function SelectionOutline() {
       warnOnce(
         "frameloop-never",
         '[click-to-source] SelectionHighlight is inside a Canvas with ' +
-          'frameloop="never", so the highlight will not render. This ' +
-          "component draws through the render loop, and with frameloop " +
-          '"never" the application drives frames itself — call advance() ' +
-          "after changing the selection, or use \"demand\", which this " +
-          "component invalidates for."
+          'frameloop="never", so the highlight shows only when your application ' +
+          "next renders. Call advance() after changing the selection, or use " +
+          '"demand", which this component invalidates for.'
       );
     }
   }, [gl, frameloop]);
-
-  // Handle rendering lifecycle.
-  //
-  // priority 1 makes R3F stop rendering and hand the final render to this
-  // subscriber — its own is `gl.render(scene, camera)`, run only when no
-  // useFrame has claimed a priority. So while this component is mounted,
-  // every frame in the application goes through whatever this does.
-  //
-  // With nothing selected it therefore does exactly what R3F would have.
-  // Going through the composer regardless was not merely an extra offscreen
-  // pass and an OutputPass quad every frame: EffectComposer's default render
-  // target is created without `samples`, so the whole application silently
-  // lost MSAA from the moment this mounted, selected or not. Antialiasing is
-  // still absent while something IS selected — restoring it there means
-  // passing a multisampled target, whose memory cost is several times the
-  // composer's current footprint and is not worth paying for an outline.
-  useFrame((state) => {
-    if (!selectedObject) {
-      state.gl.render(state.scene, state.camera);
-      return;
-    }
-
-    composer.render();
-  }, 1);
-
-  // Cleanup on unmount
-  useEffect(() => {
-    return () => {
-      // EffectComposer and some passes have a dispose method
-      if (typeof composer.dispose === "function") {
-        composer.dispose();
-      }
-      if (typeof outlinePass.dispose === "function") {
-        outlinePass.dispose();
-      }
-    };
-  }, [composer, outlinePass]);
 
   return null;
 }

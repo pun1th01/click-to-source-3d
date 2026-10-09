@@ -6,9 +6,9 @@ source location and arguments that produced it.
 Browser-pure, no framework dependency. Part of
 [Click-to-Source 3D](https://github.com/pun1th01/click-to-source-3d).
 
-Most users do not install this directly — it arrives with
-[`@click-to-source-3d/overlay`](https://www.npmjs.com/package/@click-to-source-3d/overlay).
-Install it alone if you are on plain Three.js, or building your own UI.
+Most users do not install this directly — it is bundled into the inspector
+that [`@click-to-source-3d/vite-plugin`](https://www.npmjs.com/package/@click-to-source-3d/vite-plugin)
+injects. Install it alone if you are building your own UI.
 
 ## Install
 
@@ -51,14 +51,22 @@ variant — is not recoverable from the mesh. Write
 
 ## Subpaths
 
-    @click-to-source-3d/core         the public API
-    @click-to-source-3d/core/probe   deprecated no-op, removed in 0.2.0
-    @click-to-source-3d/core/bridge  answer bridge queries over your own transport
+    @click-to-source-3d/core           the public API
+    @click-to-source-3d/core/devtools  building blocks for an inspector UI
+    @click-to-source-3d/core/bridge    answer bridge queries over your own transport
+    @click-to-source-3d/core/probe     deprecated no-op, removed in 0.2.0
 
-The `bridge` subpath is only needed if the SSE channel the Vite plugin serves
-does not fit your setup. Attach a scene with `setBridgeScene()`, then pass each
-incoming query to `answerBridgeQuery` — the same function the built-in channel
-calls, so a custom transport answers identically.
+`devtools` is what the plugin's inspector is made of, for building a different
+one: `pickAt` (the visible object under a point, resolved to its source),
+`HighlightLayer` and `attachHighlight` (a box drawn after a renderer's frame,
+without taking over its loop), `describeMesh`, `editSourceAt` and
+`editSourceFile` (edits through the plugin's endpoint), and
+`connectBridgeOverHot` (the bridge over Vite's HMR channel).
+
+The `bridge` subpath is only needed if neither of the plugin's transports fits
+your setup. Attach a scene with `setBridgeScene()`, then pass each incoming
+query to `answerBridgeQuery` — the same function the built-in channels call,
+so a custom transport answers identically.
 
 ## License
 

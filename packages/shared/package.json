@@ -3,6 +3,12 @@
   "version": "0.1.4",
   "description": "Shared utilities and types for Click-to-Source 3D",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/pun1th01/click-to-source-3d.git",
+    "directory": "packages/shared"
+  },
+  "homepage": "https://github.com/pun1th01/click-to-source-3d#readme",
   "type": "module",
   "exports": {
     ".": {

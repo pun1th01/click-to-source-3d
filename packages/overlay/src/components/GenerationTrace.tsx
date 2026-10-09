@@ -1,12 +1,12 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useOverlayStore } from "../store/overlayStore.js";
-import { describeMesh } from "../meshDetails.js";
+import { describeMesh } from "@click-to-source-3d/core/devtools";
 import { MeshDetails } from "./MeshDetails.js";
 import { DEV } from "../env.js";
 import {
   editSourceFile,
   SourceEditTransportError,
-} from "../sourceEditClient.js";
+} from "@click-to-source-3d/core/devtools";
 
 function draftValue(value: unknown): string {
   if (typeof value === "string") {
@@ -63,6 +63,12 @@ function GenerationTracePanel() {
     setMeshDetailsOpen,
     updateSourceRefArg,
   } = useOverlayStore();
+  // Tells the inspector the Vite plugin injects that this app still wires
+  // the manual components, so it can suggest removing them.
+  useEffect(() => {
+    (globalThis as { __CTS_MANUAL_OVERLAY__?: boolean }).__CTS_MANUAL_OVERLAY__ = true;
+  }, []);
+
   const [draftArgs, setDraftArgs] = useState<Record<string, string>>({});
   const [savingArg, setSavingArg] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);

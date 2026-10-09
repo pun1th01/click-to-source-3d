@@ -3,6 +3,7 @@ import {
   WRITE_FILE_PATH,
   type EditRequest,
   type SourceRef,
+  type StampedValue,
 } from "@click-to-source-3d/shared";
 
 type JsonResponse = {
@@ -113,6 +114,36 @@ export async function editSourceFile(
     // identifier as declared in source. Resolve through argSources when the
     // generator declares a mapping, otherwise pass the key through unchanged.
     argName: sourceRef.argSources?.[argName] ?? argName,
+    newValue,
+  };
+
+  await postJson(WRITE_FILE_PATH, request, fetchImpl);
+}
+
+/**
+ * Rewrites the literal a stamped value names, by its exact position.
+ *
+ * The position and the literal's text come from the build step, so no
+ * hand-written metadata is involved. The server refuses with
+ * `STALE_LOCATION` if the text at that position has changed since.
+ */
+export async function editSourceAt(
+  file: string,
+  value: Pick<StampedValue, "line" | "column" | "raw">,
+  newValue: unknown,
+  argName?: string,
+  fetchImpl: SourceEditFetch = fetch
+): Promise<void> {
+  if (value.line === undefined || value.column === undefined) {
+    throw new SourceEditTransportError("This value has no position to edit", 400);
+  }
+
+  const request: EditRequest = {
+    file,
+    line: value.line,
+    column: value.column,
+    expected: value.raw,
+    argName,
     newValue,
   };
 

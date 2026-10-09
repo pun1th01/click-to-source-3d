@@ -1,5 +1,11 @@
 # @click-to-source-3d/overlay
 
+> **Legacy.** Since 0.1.5 the inspector is built into
+> [`@click-to-source-3d/vite-plugin`](https://www.npmjs.com/package/@click-to-source-3d/vite-plugin)
+> and needs nothing in your app: run `npx click-to-source-3d init`, press
+> Alt+Shift+C, and click. This package and its components still work and can
+> be removed at your convenience; it will be retired in a later release.
+
 React Three Fiber components for inspecting a running scene: click a mesh, see
 the source location and the arguments that produced it, edit those arguments in
 place.

@@ -1,6 +1,9 @@
 import * as THREE from "three";
 import {
   BRIDGE_EVENTS_PATH,
+  BRIDGE_HELLO_EVENT,
+  BRIDGE_QUERY_EVENT,
+  BRIDGE_REPLY_EVENT,
   BRIDGE_REPLY_PATH,
   type BridgeQuery,
   type ProvenanceAddress,
@@ -283,7 +286,74 @@ function sessionId(): string {
   }
 }
 
-/** Opens the event channel and answers queries until the page goes away. */
+/** Answers one envelope, turning a throw into a reply rather than silence. */
+function reply(envelope: { requestId?: string; query?: BridgeQuery } | null) {
+  if (!envelope?.requestId || !envelope.query) {
+    return null;
+  }
+
+  let result: unknown;
+
+  try {
+    result = answerBridgeQuery(envelope.query);
+  } catch (error) {
+    result = {
+      status: "error",
+      generation,
+      message: error instanceof Error ? error.message : "query failed",
+    };
+  }
+
+  return { requestId: envelope.requestId, result };
+}
+
+/** The part of Vite's `import.meta.hot` the bridge needs. */
+export type HotChannel = {
+  send(event: string, data?: unknown): void;
+  on(event: string, listener: (data: never) => void): void;
+  off?(event: string, listener: (data: never) => void): void;
+};
+
+/**
+ * Answers queries over Vite's HMR websocket, the transport the injected
+ * inspector uses.
+ *
+ * That socket is already open to every page Vite serves, so this adds no
+ * connection of its own. The page says hello again whenever the socket
+ * reconnects — after a dev-server restart the server has forgotten it — and
+ * the server recognises a repeat hello from the same socket as the same page.
+ */
+export function connectBridgeOverHot(hot: HotChannel): () => void {
+  const hello = () => {
+    hot.send(BRIDGE_HELLO_EVENT, {
+      session: sessionId(),
+      url: typeof location === "undefined" ? "unknown" : location.href,
+    });
+  };
+
+  const onQuery = (envelope: { requestId?: string; query?: BridgeQuery }) => {
+    const answer = reply(envelope);
+    if (answer) {
+      hot.send(BRIDGE_REPLY_EVENT, answer);
+    }
+  };
+
+  hot.on(BRIDGE_QUERY_EVENT, onQuery as (data: never) => void);
+  hot.on("vite:ws:connect", hello as (data: never) => void);
+  hello();
+
+  return () => {
+    hot.off?.(BRIDGE_QUERY_EVENT, onQuery as (data: never) => void);
+    hot.off?.("vite:ws:connect", hello as (data: never) => void);
+  };
+}
+
+/**
+ * Opens the event channel and answers queries until the page goes away.
+ *
+ * The transport of `<ClickToSourceBridge />`. The injected inspector uses
+ * `connectBridgeOverHot` instead; this one goes in 0.2.0.
+ */
 export function connectBridge(): () => void {
   if (typeof EventSource === "undefined") {
     return () => undefined;
@@ -298,28 +368,16 @@ export function connectBridge(): () => void {
   );
 
   source.onmessage = (event) => {
-    let envelope: { requestId: string; query: BridgeQuery };
+    let answer: ReturnType<typeof reply>;
 
     try {
-      envelope = JSON.parse(event.data);
+      answer = reply(JSON.parse(event.data));
     } catch {
       return;
     }
 
-    if (!envelope?.requestId) {
+    if (!answer) {
       return;
-    }
-
-    let result: unknown;
-
-    try {
-      result = answerBridgeQuery(envelope.query);
-    } catch (error) {
-      result = {
-        status: "error",
-        generation,
-        message: error instanceof Error ? error.message : "query failed",
-      };
     }
 
     // Deliberately not awaited, and deliberately swallowed. The hub applies
@@ -330,7 +388,7 @@ export function connectBridge(): () => void {
     void fetch(BRIDGE_REPLY_PATH, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ requestId: envelope.requestId, result }),
+      body: JSON.stringify(answer),
     }).catch(() => undefined);
   };
 

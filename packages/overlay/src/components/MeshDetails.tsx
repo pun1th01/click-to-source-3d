@@ -3,7 +3,7 @@ import type {
   GeometryDetails,
   MaterialDetails,
   MeshDetails as MeshDetailsData,
-} from "../meshDetails.js";
+} from "@click-to-source-3d/core/devtools";
 
 const LABEL_COLOR = "#a8c7fa";
 const MUTED = "#aaa";
