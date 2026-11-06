@@ -3,6 +3,10 @@ import { fileURLToPath } from "node:url";
 import { createServer, type ViteDevServer } from "vite";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
+  AGENT_ACTIVITY_EVENT,
+  AGENT_REPORT_PATH,
+  AGENT_SELECTION_EVENT,
+  AGENT_STATE_EVENT,
   BRIDGE_HELLO_EVENT,
   BRIDGE_QUERY_EVENT,
   BRIDGE_QUERY_PATH,
@@ -46,11 +50,14 @@ async function openPage(session: string) {
   const token = server.config.webSocketToken;
   const socket = new WebSocket(`${origin.replace("http", "ws")}/?token=${token}`, "vite-hmr");
   const queries: Array<{ requestId: string; query: unknown }> = [];
+  const events: Array<{ event: string; data: unknown }> = [];
 
   socket.addEventListener("message", (event) => {
     const message = JSON.parse(String(event.data)) as Message;
     if (message.type === "custom" && message.event === BRIDGE_QUERY_EVENT) {
       queries.push(message.data as { requestId: string; query: unknown });
+    } else if (message.type === "custom" && message.event) {
+      events.push({ event: message.event, data: message.data });
     }
   });
 
@@ -67,6 +74,8 @@ async function openPage(session: string) {
 
   return {
     queries,
+    events,
+    send,
     hello,
     reply: (requestId: string, result: unknown) => send(BRIDGE_REPLY_EVENT, { requestId, result }),
     close: () =>
@@ -150,5 +159,129 @@ describe("the bridge over Vite's websocket", () => {
 
     await one.close();
     await two.close();
+  });
+});
+
+describe("an assistant at work, seen from the page", () => {
+  const report = (body: unknown, headers: Record<string, string> = {}) =>
+    fetch(`${origin}${AGENT_REPORT_PATH}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...headers },
+      body: JSON.stringify(body),
+    });
+  const agent = { id: "e2e-agent", name: "Claude Code" };
+
+  it("tells a page who is connected as soon as it says hello", async () => {
+    await report({ agent });
+    const page = await openPage("agent-hello");
+
+    await until(() => page.events.some((entry) => entry.event === AGENT_STATE_EVENT));
+    const state = page.events.find((entry) => entry.event === AGENT_STATE_EVENT)!.data as {
+      agents: Array<{ name: string }>;
+    };
+    expect(state.agents.map((entry) => entry.name)).toContain("Claude Code");
+
+    await report({ agent, leaving: true });
+    await page.close();
+  });
+
+  it("passes each tool call on to the page", async () => {
+    const page = await openPage("agent-activity");
+    await until(() => page.events.some((entry) => entry.event === AGENT_STATE_EVENT));
+
+    const response = await report({
+      agent,
+      activity: { tool: "get_source", detail: "src/a.tsx", result: "lines 1-9", status: "ok", effect: "read", durationMs: 3, targets: [] },
+    });
+    expect(response.status).toBe(200);
+
+    await until(() => page.events.some((entry) => entry.event === AGENT_ACTIVITY_EVENT));
+    expect(page.events.find((entry) => entry.event === AGENT_ACTIVITY_EVENT)!.data).toMatchObject({
+      tool: "get_source",
+      agent: "Claude Code",
+      result: "lines 1-9",
+    });
+
+    await report({ agent, leaving: true });
+    await page.close();
+  });
+
+  it("gives a page that opens later the log so far", async () => {
+    await report({
+      agent,
+      activity: { tool: "list_files", detail: "", result: "3 files", status: "ok", effect: "read", durationMs: 1, targets: [] },
+    });
+
+    const page = await openPage("agent-late");
+
+    await until(() => page.events.some((entry) => entry.event === AGENT_STATE_EVENT));
+    const state = page.events.find((entry) => entry.event === AGENT_STATE_EVENT)!.data as {
+      log: Array<{ tool: string }>;
+    };
+    expect(state.log.map((entry) => entry.tool)).toContain("list_files");
+
+    await report({ agent, leaving: true });
+    await page.close();
+  });
+
+  it("answers get_selection from what the page published, without asking it", async () => {
+    const page = await openPage("agent-pointing");
+    const box = { kind: "Mesh", source: { file: "src/a.tsx", function: "A", line: 3 }, props: [] };
+
+    page.send(AGENT_SELECTION_EVENT, { pointing: [box], selected: null });
+
+    await expect
+      .poll(async () => {
+        const answer = (await ask({ query: { kind: "get_selection" } })) as {
+          result?: { pointing?: unknown[] };
+        };
+        return answer.result?.pointing?.length;
+      })
+      .toBe(1);
+    expect(page.queries).toEqual([]);
+
+    const final = (await ask({ query: { kind: "get_selection" } })) as {
+      status: string;
+      result: { pointing: unknown[]; url: string };
+    };
+    expect(final.status).toBe("answered");
+    expect(final.result.pointing).toEqual([box]);
+    expect(final.result.url).toBe("http://page/");
+
+    page.send(AGENT_SELECTION_EVENT, { pointing: [], selected: null });
+    await page.close();
+  });
+
+  it("takes nothing from a socket that has not said hello", async () => {
+    const token = server.config.webSocketToken;
+    const socket = new WebSocket(`${origin.replace("http", "ws")}/?token=${token}`, "vite-hmr");
+    await new Promise<void>((resolve) => socket.addEventListener("open", () => resolve(), { once: true }));
+
+    socket.send(
+      JSON.stringify({
+        type: "custom",
+        event: AGENT_SELECTION_EVENT,
+        data: { pointing: [{ kind: "Mesh" , source: { file: "evil.tsx", function: "x", line: 1 } }], selected: null },
+      })
+    );
+    await new Promise((resolve) => setTimeout(resolve, 100));
+
+    const answer = JSON.stringify(await ask({ query: { kind: "get_selection" } }));
+    expect(answer).not.toContain("evil.tsx");
+    socket.close();
+  });
+
+  // The same policy as every other endpoint that reaches the page.
+  it("refuses a report from another origin", async () => {
+    const response = await report({ agent }, { Origin: "http://evil.example" });
+
+    expect(response.status).toBe(403);
+  });
+
+  it("keeps the report endpoint's reply simple whatever it is sent", async () => {
+    const response = await report({ nonsense: true });
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ ok: true });
   });
 });

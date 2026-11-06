@@ -318,3 +318,47 @@ describe("BridgeHub pages on other channels", () => {
     expect(hub.pageCount()).toBe(1);
   });
 });
+
+describe("BridgeHub.broadcast", () => {
+  it("tells every attached page, on a transport that can be told", () => {
+    const hub = new BridgeHub();
+    const told: string[] = [];
+
+    hub.attach(
+      { send: () => undefined, emit: (event) => told.push(`a:${event}`) },
+      { key: {}, session: "a" }
+    );
+    hub.attach(
+      { send: () => undefined, emit: (event) => told.push(`b:${event}`) },
+      { key: {}, session: "b" }
+    );
+    // The old transport, which only answers questions.
+    hub.attach({ send: () => undefined }, { key: {}, session: "c" });
+
+    hub.broadcast("news", {});
+
+    expect(told).toEqual(["a:news", "b:news"]);
+  });
+
+  it("is not stopped by a page going away as it is told", () => {
+    const hub = new BridgeHub();
+    const told: string[] = [];
+
+    hub.attach(
+      {
+        send: () => undefined,
+        emit: () => {
+          throw new Error("socket closed");
+        },
+      },
+      { key: {}, session: "a" }
+    );
+    hub.attach(
+      { send: () => undefined, emit: (event) => told.push(event) },
+      { key: {}, session: "b" }
+    );
+
+    expect(() => hub.broadcast("news", {})).not.toThrow();
+    expect(told).toEqual(["news"]);
+  });
+});

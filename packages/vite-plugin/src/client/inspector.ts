@@ -1,23 +1,44 @@
 import * as THREE from "three";
 import {
   OPEN_IN_EDITOR_PATH,
+  type AgentActivity,
+  type ObjectCost,
   type SourceStamp,
-  type StampedProp,
   type StampedValue,
 } from "@click-to-source-3d/shared";
 import { resolveSourceRef } from "@click-to-source-3d/core";
 import {
   describeMesh,
-  editSourceAt,
   editSourceFile,
+  measureObject,
   ndcFromClient,
   pickAt,
   type HotChannel,
   type Pick,
 } from "@click-to-source-3d/core/devtools";
+import { agentStatusText, agentTab } from "./agentTab.js";
+import type { AgentLink } from "./agentLink.js";
+import { blobOf, captureView } from "./capture.js";
+import { compareTab } from "./compareTab.js";
 import type { Discovery, View } from "./discovery.js";
 import { h, icon, ICONS } from "./dom.js";
+import { ValueEditors } from "./editors.js";
+import { formatBytes, formatCount, plural } from "./format.js";
+import { copyImage, copyReport, reportMarkdown } from "./report.js";
 import { STYLES } from "./styles.js";
+import {
+  addressOf,
+  describeTarget,
+  findAddress,
+  findRefs,
+  isInside,
+  kindOf,
+  labelOf,
+  sameTarget,
+  stampOf,
+  type Address,
+  type Target,
+} from "./targets.js";
 import { draftOf, parseDraft } from "./values.js";
 
 export type InspectorOptions = {
@@ -27,20 +48,25 @@ export type InspectorOptions = {
   button: boolean;
 };
 
-type Selection = { view: View; pick: Pick };
+type Tab = "inspect" | "compare" | "agent";
 
-/** Enough to find a selection again after a full reload. */
-type Address = {
-  file: string;
-  line: number;
-  column?: number;
-  ordinal: number;
-  instanceId: number | null;
+/** A target kept across updates, with what it takes to find it again. */
+type Held = Target & { address: Address | null };
+
+type Saved = {
+  inspecting: boolean;
+  pointerMode: boolean;
+  panelOpen: boolean;
+  tab: Tab;
+  selection: Address | null;
+  pointing: Address[];
+  pins: Address[];
 };
 
-type Saved = { inspecting: boolean; selection: Address | null };
-
 const STORAGE_KEY = "__cts_inspector";
+
+/** Two are side by side; a third pin replaces the oldest. */
+const MAX_PINS = 2;
 
 type Hotkey = {
   alt: boolean;
@@ -106,26 +132,18 @@ function isTyping(event: Event): boolean {
   return target.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName);
 }
 
-function kindOf(object: THREE.Object3D): string {
-  // three gives InstancedMesh no type string of its own.
-  return (object as THREE.InstancedMesh).isInstancedMesh ? "InstancedMesh" : object.type;
+/**
+ * What the panel draws an object's values from. A module update replaces them
+ * with new objects, so comparing identity says whether this object's source
+ * could have changed.
+ */
+function marksOf(target: Target): unknown[] {
+  const resolved = target.pick.resolution?.object;
+  return [resolved, stampOf(resolved), resolved?.userData?.sourceRef];
 }
 
-function stampOf(object: THREE.Object3D | undefined): SourceStamp | undefined {
-  return object?.userData?.__ctsSource as SourceStamp | undefined;
-}
-
-function sameSite(a: SourceStamp, b: { file: string; line: number; column?: number }): boolean {
-  return a.file === b.file && a.line === b.line && (b.column === undefined || a.column === b.column);
-}
-
-function isInside(object: THREE.Object3D, root: THREE.Object3D): boolean {
-  for (let current: THREE.Object3D | null = object; current; current = current.parent) {
-    if (current === root) {
-      return true;
-    }
-  }
-  return false;
+function sameMarks(a: unknown[], b: unknown[]): boolean {
+  return a.length === b.length && a.every((mark, index) => mark === b[index]);
 }
 
 function errorText(error: unknown): string {
@@ -145,12 +163,31 @@ export class Inspector {
   private readonly host: HTMLElement;
   private readonly root: HTMLDivElement;
   private readonly toggle: HTMLButtonElement;
+  private readonly pointer: HTMLButtonElement;
+  private readonly pointerCount: HTMLSpanElement;
   private readonly tip: HTMLDivElement;
   private panel: HTMLElement | null = null;
+  private tabsRow: HTMLElement | null = null;
+  private bodies: Record<Tab, HTMLElement> | null = null;
+  private toolbar: HTMLElement | null = null;
+  private unsaved: HTMLElement | null = null;
   private statusLine: HTMLElement | null = null;
 
   private inspecting = false;
-  private selection: Selection | null = null;
+  /** Inspect mode in which a click points the assistant at an object. */
+  private pointerMode = false;
+  private panelOpen = false;
+  private tab: Tab = "inspect";
+  private selection: Target | null = null;
+  private pointing: Held[] = [];
+  private pins: Held[] = [];
+  private lastAddress: Address | null = null;
+  /** What the Inspect tab was drawn from. */
+  private shownMarks: unknown[] = [];
+  private refreshGeneration = 0;
+  private restoring = false;
+  private differencesOnly = false;
+  private readonly openSections = new Set<string>();
   private status: { kind: "ok" | "error"; text: string } | null = null;
   private downAt: { x: number; y: number } | null = null;
   private pendingHover: { view: View; x: number; y: number } | null = null;
@@ -158,13 +195,21 @@ export class Inspector {
   private noteShown = false;
   private readonly cursors = new Map<HTMLCanvasElement, string>();
   private readonly raycaster = new THREE.Raycaster();
+  private readonly editors: ValueEditors;
 
   constructor(
     private readonly discovery: Discovery,
     private readonly options: InspectorOptions,
-    private readonly hot: HotChannel | null
+    private readonly hot: HotChannel | null,
+    private readonly agent: AgentLink | null = null
   ) {
     this.hotkey = parseHotkey(options.hotkey);
+
+    this.editors = new ValueEditors({
+      status: (kind, text) => this.setStatus(kind, text),
+      redraw: () => this.selection?.view.redraw(),
+      changed: () => this.showUnsaved(),
+    });
 
     this.host = document.createElement("cts-devtools");
     this.host.setAttribute(
@@ -188,9 +233,24 @@ export class Inspector {
       [icon(ICONS.crosshair)]
     );
     this.toggle.hidden = true;
+
+    this.pointerCount = h("span", { class: "count" });
+    this.pointerCount.hidden = true;
+    this.pointer = h(
+      "button",
+      {
+        class: "toggle pointer",
+        title: "Point your assistant at objects",
+        attrs: { type: "button", "aria-label": "Point your assistant at objects", "aria-pressed": "false" },
+        on: { click: () => this.setPointerMode(!this.pointerMode) },
+      },
+      [icon(ICONS.point), this.pointerCount]
+    );
+    this.pointer.hidden = true;
+
     this.tip = h("div", { class: "tip" });
     this.tip.hidden = true;
-    this.root.append(this.toggle, this.tip);
+    this.root.append(this.toggle, this.pointer, this.tip);
 
     // Keys typed into the panel are the panel's. An application listening on
     // window — OrbitControls' arrow keys, a game's WASD — must not also act
@@ -208,8 +268,11 @@ export class Inspector {
     window.addEventListener("resize", this.place);
     window.addEventListener("scroll", this.place, true);
     // A canvas can move or resize without either event: a layout change, a
-    // panel opening beside it.
-    setInterval(this.place, 1000);
+    // panel opening beside it. The status line counts seconds since a call.
+    setInterval(() => {
+      this.place();
+      this.showAgentStatus();
+    }, 1000);
 
     this.discovery.onView(() => this.place());
     this.place();
@@ -217,6 +280,7 @@ export class Inspector {
     // After Save, Vite updates the module and R3F re-applies the new stamp to
     // the same object. Re-read it then, so positions and values stay current.
     this.hot?.on("vite:afterUpdate", (() => this.refreshSoon()) as (data: never) => void);
+    this.agent?.onChange(() => this.onAgentChange());
 
     this.restore();
   }
@@ -243,6 +307,9 @@ export class Inspector {
 
     if (!on) {
       this.clearHover();
+      this.pointerMode = false;
+      this.showPointerState();
+      this.renderAgent();
     }
 
     const global = globalThis as { __CTS_MANUAL_OVERLAY__?: boolean };
@@ -257,12 +324,35 @@ export class Inspector {
     this.save();
   }
 
-  /** Puts the toggle button at the bottom-right corner of the main canvas. */
+  /**
+   * Inspect mode in which a click points the assistant at an object instead of
+   * selecting it, so several can be picked one after another. Opens the Agent
+   * tab, where the list of them is.
+   */
+  private setPointerMode(on: boolean): void {
+    if (!on) {
+      this.setInspecting(false);
+      return;
+    }
+
+    this.pointerMode = true;
+    this.setInspecting(true);
+    this.openTab("agent");
+    this.showPointerState();
+    this.renderAgent();
+    this.save();
+  }
+
+  /**
+   * Puts the toggle button at the bottom-right corner of the main canvas, with
+   * the pointer button beside it while there is an assistant to point.
+   */
   private place = (): void => {
     const view = this.discovery.primary();
 
     if (!view || !this.options.button) {
       this.toggle.hidden = true;
+      this.pointer.hidden = true;
       return;
     }
 
@@ -271,10 +361,23 @@ export class Inspector {
     const inset = 12;
     const left = Math.min(rect.right, window.innerWidth) - size - inset;
     const top = Math.min(rect.bottom, window.innerHeight) - size - inset;
-    this.toggle.style.left = `${Math.max(rect.left + inset, left)}px`;
-    this.toggle.style.top = `${Math.max(rect.top + inset, top)}px`;
+    const x = Math.max(rect.left + inset, left);
+    const y = Math.max(rect.top + inset, top);
+    this.toggle.style.left = `${x}px`;
+    this.toggle.style.top = `${y}px`;
     this.toggle.hidden = false;
+
+    this.pointer.style.left = `${Math.max(rect.left + inset, x - size - 8)}px`;
+    this.pointer.style.top = `${y}px`;
+    this.pointer.hidden = !this.agent || (!this.agent.connected && this.pointing.length === 0);
   };
+
+  private showPointerState(): void {
+    this.pointer.setAttribute("aria-pressed", String(this.pointerMode));
+    this.pointerCount.textContent = String(this.pointing.length);
+    this.pointerCount.hidden = this.pointing.length === 0;
+    this.place();
+  }
 
   // ── Input ─────────────────────────────────────────────────────────────────
 
@@ -293,8 +396,8 @@ export class Inspector {
     if (event.key === "Escape") {
       if (this.inspecting) {
         this.setInspecting(false);
-      } else if (this.selection) {
-        this.select(null);
+      } else if (this.panelOpen) {
+        this.closePanel();
       }
     }
   };
@@ -354,6 +457,14 @@ export class Inspector {
       return;
     }
 
+    if (this.agent && (this.pointerMode || event.shiftKey)) {
+      const pick = this.pick(view, event.clientX, event.clientY);
+      if (pick) {
+        this.togglePointing({ view, pick });
+      }
+      return;
+    }
+
     this.selectAtClient(view, event.clientX, event.clientY);
   };
 
@@ -390,12 +501,16 @@ export class Inspector {
     }
 
     const ref = pick.resolution?.sourceRef;
+    const pointed = this.pointing.some((held) => sameTarget(held, { view, pick }));
     this.tip.replaceChildren(
       h("span", { text: kindOf(pick.object) }),
       " · ",
       ref
         ? h("span", { class: "where mono", text: `${ref.file}:${ref.line}` })
-        : h("span", { class: "none", text: "no source" })
+        : h("span", { class: "none", text: "no source" }),
+      this.pointerMode
+        ? h("span", { class: "none", text: pointed ? " · click to remove" : " · click to point" })
+        : ""
     );
     this.tip.hidden = false;
     const width = this.tip.offsetWidth;
@@ -418,13 +533,14 @@ export class Inspector {
     this.select(pick ? { view, pick } : null);
   }
 
-  select(selection: Selection | null): void {
+  select(selection: Target | null): void {
     const previous = this.selection;
     if (previous) {
       previous.view.layer.set("selected", null);
       previous.view.redraw();
     }
 
+    this.editors.begin(null);
     this.selection = selection;
     this.status = null;
 
@@ -434,31 +550,222 @@ export class Inspector {
         instanceId: selection.pick.instanceId,
       });
       selection.view.redraw();
+      this.panelOpen = true;
+      if (this.tab === "agent") {
+        this.tab = "inspect";
+      }
+    } else if (this.tab === "inspect") {
+      this.panelOpen = false;
     }
 
     this.render();
     this.save();
+    this.publish();
+  }
+
+  private closePanel(): void {
+    this.panelOpen = false;
+    this.tab = "inspect";
+    this.select(null);
+  }
+
+  // ── Pointing and pinning ──────────────────────────────────────────────────
+
+  private hold(target: Target): Held {
+    return { view: target.view, pick: target.pick, address: addressOf(target) };
+  }
+
+  /** The boxes for what is held, which outlast any one selection. */
+  private showHeld(): void {
+    for (const view of this.discovery.all()) {
+      const boxes = (list: Held[]) =>
+        list
+          .filter((held) => held.view === view)
+          .map(({ pick }) => ({ object: pick.object, instanceId: pick.instanceId }));
+      view.layer.setAll("pointed", boxes(this.pointing));
+      view.layer.setAll("pinned", boxes(this.pins));
+      view.redraw();
+    }
+  }
+
+  private togglePointing(target: Target): void {
+    const index = this.pointing.findIndex((held) => sameTarget(held, target));
+    if (index >= 0) {
+      this.pointing.splice(index, 1);
+    } else {
+      this.pointing.push(this.hold(target));
+    }
+    this.pointingChanged();
+  }
+
+  private pointingChanged(): void {
+    this.showHeld();
+    this.showPointerState();
+    this.renderTabs();
+    this.renderToolbar();
+    this.renderAgent();
+    this.save();
+    this.publish();
+  }
+
+  private togglePin(target: Target): void {
+    const index = this.pins.findIndex((held) => sameTarget(held, target));
+    if (index >= 0) {
+      this.pins.splice(index, 1);
+    } else {
+      this.pins.push(this.hold(target));
+      if (this.pins.length > MAX_PINS) {
+        this.pins.shift();
+      }
+    }
+    this.pinsChanged();
+  }
+
+  private pinsChanged(): void {
+    this.showHeld();
+    this.renderToolbar();
+    this.renderCompare();
+    this.save();
+  }
+
+  /** Tells the assistant what is selected and pointed at, when there is one to tell. */
+  private publish(): void {
+    if (!this.agent || this.restoring) {
+      return;
+    }
+    this.agent.publish({
+      pointing: this.pointing.map(describeTarget),
+      selected: this.selection ? describeTarget(this.selection) : null,
+    });
+  }
+
+  private onAgentChange(): void {
+    this.renderTabs();
+    this.renderAgent();
+    this.place();
+  }
+
+  /** A line in the log leads to its object if the scene has it, or else its source. */
+  private followEntry(entry: AgentActivity): void {
+    const target = entry.targets[0];
+    if (!target) {
+      return;
+    }
+    const found = findRefs(this.discovery, target)[0];
+    if (found) {
+      this.select(found);
+    } else {
+      void this.open(target.file, target.line, target.column);
+    }
   }
 
   // ── Panel ─────────────────────────────────────────────────────────────────
 
   private render(): void {
-    this.panel?.remove();
-    this.panel = null;
-    this.statusLine = null;
-
-    const selection = this.selection;
-    if (!selection) {
+    if (!this.panelOpen) {
+      this.panel?.remove();
+      this.panel = null;
+      this.tabsRow = null;
+      this.bodies = null;
+      this.toolbar = null;
+      this.unsaved = null;
+      this.statusLine = null;
       return;
     }
 
-    const { pick } = selection;
-    const object = pick.object;
-    const resolution = pick.resolution;
+    if (!this.panel) {
+      this.tabsRow = h("div", { class: "head", attrs: { role: "tablist" } });
+      this.bodies = {
+        inspect: h("div", { class: "body", attrs: { role: "tabpanel", "data-cts-tab": "inspect" } }),
+        compare: h("div", { class: "body", attrs: { role: "tabpanel", "data-cts-tab": "compare" } }),
+        agent: h("div", { class: "body", attrs: { role: "tabpanel", "data-cts-tab": "agent" } }),
+      };
+      this.unsaved = h("div", { class: "unsaved" });
+      this.unsaved.hidden = true;
+      this.statusLine = h("div", { class: "status" });
+      this.statusLine.hidden = true;
+      this.panel = h(
+        "div",
+        { class: "panel", attrs: { role: "dialog", "aria-label": "Click-to-Source inspector" } },
+        [
+          this.tabsRow,
+          this.bodies.inspect,
+          this.bodies.compare,
+          this.bodies.agent,
+          this.unsaved,
+          this.statusLine,
+        ]
+      );
+      this.root.append(this.panel);
+    }
 
-    const head = h("div", { class: "head" }, [
-      h("span", { class: "kind", text: kindOf(object) }),
-      object.name ? h("span", { class: "name mono", text: object.name }) : null,
+    this.renderTabs();
+    this.renderInspect();
+    this.renderCompare();
+    this.renderAgent();
+    this.showTab();
+    this.showUnsaved();
+    this.showStatus();
+  }
+
+  private openTab(tab: Tab): void {
+    this.tab = tab;
+    if (!this.panelOpen) {
+      this.panelOpen = true;
+      this.render();
+    } else {
+      this.renderTabs();
+      this.showTab();
+    }
+    this.save();
+  }
+
+  private showTab(): void {
+    if (!this.panel || !this.bodies) {
+      return;
+    }
+    this.panel.setAttribute("data-tab", this.tab);
+    for (const [tab, body] of Object.entries(this.bodies)) {
+      body.hidden = tab !== this.tab;
+    }
+    if (this.tab === "compare") {
+      this.renderCompare();
+    }
+  }
+
+  private renderTabs(): void {
+    if (!this.tabsRow) {
+      return;
+    }
+
+    const tab = (name: Tab, label: string, extras: Array<Node | null> = []) =>
+      h(
+        "button",
+        {
+          class: "tab",
+          attrs: {
+            type: "button",
+            role: "tab",
+            "aria-selected": String(this.tab === name),
+            "data-cts-open-tab": name,
+          },
+          on: { click: () => this.openTab(name) },
+        },
+        [label, ...extras]
+      );
+
+    const count = this.pointing.length;
+    this.tabsRow.replaceChildren(
+      tab("inspect", "Inspect"),
+      tab("compare", "Compare"),
+      ...(this.agent
+        ? [
+            tab("agent", "Agent", [
+              count > 0 ? h("span", { class: "count", text: String(count) }) : null,
+              h("span", { class: `dot ${this.agent.connected ? "on" : ""}` }),
+            ]),
+          ]
+        : []),
       h("span", { class: "spacer" }),
       h(
         "button",
@@ -466,13 +773,44 @@ export class Inspector {
           class: "icon-button",
           title: "Close (Esc)",
           attrs: { type: "button", "aria-label": "Close" },
-          on: { click: () => this.select(null) },
+          on: { click: () => this.closePanel() },
         },
         [icon(ICONS.close)]
-      ),
-    ]);
+      )
+    );
+  }
 
-    const body = h("div", { class: "body" });
+  private renderInspect(): void {
+    const body = this.bodies?.inspect;
+    if (!body) {
+      return;
+    }
+
+    const selection = this.selection;
+    this.toolbar = null;
+    this.editors.begin(selection?.pick.resolution?.object ?? null);
+    this.shownMarks = selection ? marksOf(selection) : [];
+
+    if (!selection) {
+      body.replaceChildren(
+        h("div", {
+          class: "note",
+          text: `Nothing selected. Press ${hotkeyLabel(this.options.hotkey)} and click an object.`,
+        })
+      );
+      return;
+    }
+
+    const { pick } = selection;
+    const object = pick.object;
+    const resolution = pick.resolution;
+
+    body.replaceChildren(
+      h("div", { class: "title" }, [
+        h("span", { class: "kind", text: kindOf(object) }),
+        object.name ? h("span", { class: "name mono", text: object.name }) : null,
+      ])
+    );
 
     if (resolution) {
       const ref = resolution.sourceRef;
@@ -497,6 +835,15 @@ export class Inspector {
           ),
         ])
       );
+    }
+
+    this.toolbar = h("div", { class: "actions" });
+    body.append(this.toolbar);
+    this.renderToolbar();
+
+    if (resolution) {
+      const ref = resolution.sourceRef;
+      const stamp = stampOf(resolution.object);
 
       if (resolution.object !== object) {
         body.append(
@@ -535,25 +882,194 @@ export class Inspector {
       }
     }
 
+    const performance = this.performanceSection(selection);
+    if (performance) {
+      body.append(performance);
+    }
     body.append(this.detailsSection(pick));
     body.append(
       h("div", {
         class: "hint",
-        text: `Edit a value and press Enter to save it to source. ${hotkeyLabel(
+        text: `Drag or type to preview a value, and press Enter to save it to source. ${hotkeyLabel(
           this.options.hotkey
-        )} toggles inspect mode.`,
+        )} toggles inspect mode.${this.agent ? " Shift+click points your assistant at an object." : ""}`,
       })
     );
+  }
 
-    this.statusLine = h("div", { class: "status" });
-    this.statusLine.hidden = true;
-    this.panel = h(
-      "div",
-      { class: "panel", attrs: { role: "dialog", "aria-label": "Click-to-Source inspector" } },
-      [head, body, this.statusLine]
+  /** What can be done with the selected object. Redrawn alone, to keep any draft. */
+  private renderToolbar(): void {
+    const toolbar = this.toolbar;
+    const selection = this.selection;
+    if (!toolbar || !selection) {
+      return;
+    }
+
+    const action = (
+      name: string,
+      paths: string[],
+      label: string,
+      title: string,
+      onClick: () => void,
+      pressed?: boolean
+    ) =>
+      h(
+        "button",
+        {
+          class: "action",
+          title,
+          attrs: {
+            type: "button",
+            "data-cts-action": name,
+            ...(pressed === undefined ? {} : { "aria-pressed": String(pressed) }),
+          },
+          on: { click: onClick },
+        },
+        [icon(paths), label]
+      );
+
+    const pointed = this.pointing.some((held) => sameTarget(held, selection));
+    const pinned = this.pins.some((held) => sameTarget(held, selection));
+
+    toolbar.replaceChildren(
+      ...(this.agent
+        ? [
+            action(
+              "point",
+              ICONS.point,
+              pointed ? "Pointing" : "Point",
+              "Show this object to your assistant, then tell it what to do",
+              () => this.togglePointing(selection),
+              pointed
+            ),
+          ]
+        : []),
+      action(
+        "pin",
+        ICONS.pin,
+        pinned ? "Pinned" : "Pin",
+        "Pin this object to compare it with another",
+        () => this.togglePin(selection),
+        pinned
+      ),
+      action(
+        "report",
+        ICONS.report,
+        "Report",
+        "Copy where this came from, its values and a screenshot, for a bug report",
+        () => void this.copyBugReport(selection)
+      ),
+      action(
+        "screenshot",
+        ICONS.camera,
+        "Image",
+        "Copy a screenshot of the canvas",
+        () => void this.copyScreenshot(selection)
+      )
     );
-    this.root.append(this.panel);
-    this.showStatus();
+  }
+
+  private renderCompare(): void {
+    const body = this.bodies?.compare;
+    if (!body || this.tab !== "compare") {
+      return;
+    }
+
+    const columns: Target[] = [...this.pins];
+    if (this.selection && columns.length < 2 && !columns.some((held) => sameTarget(held, this.selection!))) {
+      columns.push(this.selection);
+    }
+
+    body.replaceChildren(
+      ...compareTab({
+        columns,
+        isPinned: (target) => this.pins.some((held) => sameTarget(held, target)),
+        differencesOnly: this.differencesOnly,
+        onDifferencesOnly: (on) => {
+          this.differencesOnly = on;
+          this.renderCompare();
+        },
+        onUnpin: (target) => this.togglePin(target),
+        onSelect: (target) => this.select(target),
+      })
+    );
+  }
+
+  private renderAgent(): void {
+    const body = this.bodies?.agent;
+    const agent = this.agent;
+    if (!body || !agent) {
+      return;
+    }
+
+    const scroll = body.scrollTop;
+    const selection = this.selection;
+    body.replaceChildren(
+      ...agentTab({
+        agents: agent.agents,
+        log: agent.log,
+        pointing: this.pointing,
+        pointerMode: this.pointerMode,
+        canPointAtSelection:
+          selection !== null && !this.pointing.some((held) => sameTarget(held, selection)),
+        onTogglePointerMode: () => this.setPointerMode(!this.pointerMode),
+        onPointAtSelection: () => {
+          if (selection) {
+            this.togglePointing(selection);
+          }
+        },
+        onRemove: (target) => this.togglePointing(target),
+        onClear: () => {
+          this.pointing = [];
+          this.pointingChanged();
+        },
+        onSelect: (target) => this.select(target),
+        onEntry: (entry) => this.followEntry(entry),
+      })
+    );
+    body.scrollTop = scroll;
+  }
+
+  private showAgentStatus(): void {
+    const line = this.bodies?.agent.querySelector("[data-cts-agent-status]");
+    if (line && this.agent && this.tab === "agent") {
+      line.textContent = agentStatusText(this.agent.agents, Date.now());
+    }
+  }
+
+  private showUnsaved(): void {
+    const bar = this.unsaved;
+    if (!bar) {
+      return;
+    }
+
+    const count = this.editors.count;
+    bar.hidden = count === 0;
+    if (count === 0) {
+      return;
+    }
+    bar.replaceChildren(
+      h("span", { text: `${plural(count, "unsaved value")} shown in the scene` }),
+      h("span", { class: "spacer" }),
+      h(
+        "button",
+        {
+          class: "action",
+          attrs: { type: "button", "data-cts-action": "revert" },
+          on: { click: () => this.editors.revert() },
+        },
+        ["Revert"]
+      ),
+      h(
+        "button",
+        {
+          class: "action primary",
+          attrs: { type: "button", "data-cts-action": "save" },
+          on: { click: () => void this.editors.saveAll() },
+        },
+        ["Save"]
+      )
+    );
   }
 
   private setStatus(kind: "ok" | "error", text: string): void {
@@ -588,74 +1104,13 @@ export class Inspector {
           h(
             "div",
             { class: "values" },
-            prop.values.map((value, index) => this.valueEditor(stamp.file, prop, value, index))
+            prop.values.map((value, index) => this.editors.editor(stamp.file, prop, value, index))
           ),
         ])
       );
     }
 
     return section;
-  }
-
-  private valueEditor(file: string, prop: StampedProp, value: StampedValue, index: number): HTMLElement {
-    if (!value.editable) {
-      return h("div", { class: "value ro" }, [h("div", { class: "readonly mono", text: value.raw })]);
-    }
-
-    const name = `${prop.element}.${prop.name}${prop.array ? `[${index}]` : ""}`;
-    const input = h("input", {
-      attrs: { type: "text", spellcheck: "false", "aria-label": name, "data-cts-edit": name },
-    });
-    const initial = draftOf(value);
-    input.value = initial;
-
-    input.addEventListener("input", () => input.classList.toggle("dirty", input.value !== initial));
-    input.addEventListener("keydown", (event) => {
-      if (event.key === "Enter") {
-        event.preventDefault();
-        void this.saveValue(file, prop, value, input, initial);
-      } else if (event.key === "Escape") {
-        input.value = initial;
-        input.classList.remove("dirty");
-        input.blur();
-      }
-    });
-
-    return h("div", { class: "value" }, [
-      input,
-      value.via
-        ? h("div", { class: "via mono", text: `${value.via} · line ${value.line}` })
-        : null,
-    ]);
-  }
-
-  private async saveValue(
-    file: string,
-    prop: StampedProp,
-    value: StampedValue,
-    input: HTMLInputElement,
-    initial: string
-  ): Promise<void> {
-    if (input.value === initial) {
-      return;
-    }
-
-    const parsed = parseDraft(value, input.value);
-    if (!parsed.ok) {
-      this.setStatus("error", parsed.error);
-      return;
-    }
-
-    input.disabled = true;
-    try {
-      await editSourceAt(file, value, parsed.value, prop.name);
-      input.classList.remove("dirty");
-      this.setStatus("ok", `Saved ${value.via ?? prop.name}. Vite is updating the scene.`);
-    } catch (error) {
-      this.setStatus("error", errorText(error));
-    } finally {
-      input.disabled = false;
-    }
   }
 
   /** Values from a hand-written sourceRef, edited by name as before. */
@@ -723,6 +1178,75 @@ export class Inspector {
     ]);
   }
 
+  /** A <details> that stays open or closed across redraws of the panel. */
+  private foldable(name: string, summary: Array<Node | string>, content: HTMLElement): HTMLDetailsElement {
+    const details = h("details", {}, [h("summary", {}, summary), content]);
+    details.open = this.openSections.has(name);
+    details.addEventListener("toggle", () => {
+      if (details.open) {
+        this.openSections.add(name);
+      } else {
+        this.openSections.delete(name);
+      }
+    });
+    return details;
+  }
+
+  /** What drawing the object costs: the answer to "why is this slow?" */
+  private performanceSection(selection: Target): HTMLElement | null {
+    const cost: ObjectCost | null = measureObject(selection.pick.object);
+    if (!cost) {
+      return null;
+    }
+
+    const grid = h("div", { class: "detail-grid" });
+    const row = (key: string, value: string) =>
+      grid.append(h("div", { class: "k", text: key }), h("div", { class: "mono", text: value }));
+
+    row("triangles", formatCount(cost.triangles));
+    row("draw calls", formatCount(cost.drawCalls));
+    row("vertices", formatCount(cost.vertices));
+    if (cost.instances !== null) {
+      row("instances", formatCount(cost.instances));
+    }
+    if (cost.meshes > 1) {
+      row("meshes", formatCount(cost.meshes));
+    }
+    row("geometry", formatBytes(cost.geometryBytes));
+    row("materials", formatCount(cost.materials));
+    for (const texture of cost.textures) {
+      const size = texture.width !== null ? `${texture.width}×${texture.height}` : "not loaded";
+      row(texture.slot, texture.bytes !== null ? `${size} · ${formatBytes(texture.bytes)}` : size);
+    }
+    if (cost.castsShadow) {
+      row("casts shadow", "drawn again per light");
+    }
+
+    // The last frame, as three counted it. A composer's final pass draws one
+    // triangle, so a total smaller than this one object says nothing about it.
+    const frame = selection.view.renderer.info?.render;
+    if (frame && frame.triangles >= cost.triangles && cost.triangles > 0) {
+      const share = Math.round((cost.triangles / frame.triangles) * 100);
+      row("of the frame", `${share < 1 ? "under 1" : share}% of ${formatCount(frame.triangles)} triangles`);
+    }
+
+    if (selection.pick.instanceId !== null) {
+      grid.append(h("div", { class: "span", text: "For the whole InstancedMesh, which draws its instances together." }));
+    }
+
+    return this.foldable(
+      "performance",
+      [
+        "Performance",
+        h("span", {
+          class: "headline mono",
+          text: `${plural(cost.triangles, "triangle")} · ${plural(cost.drawCalls, "draw call")}`,
+        }),
+      ],
+      grid
+    );
+  }
+
   private detailsSection(pick: Pick): HTMLElement {
     const details = describeMesh(pick.object, pick.instanceId);
     const grid = h("div", { class: "detail-grid" });
@@ -745,7 +1269,7 @@ export class Inspector {
       row("material", material.color ? `${material.type} ${material.color}` : material.type);
     }
 
-    return h("details", {}, [h("summary", { text: "Details" }), grid]);
+    return this.foldable("details", ["Details"], grid);
   }
 
   private async open(file: string, line: number, column?: number): Promise<void> {
@@ -764,114 +1288,173 @@ export class Inspector {
     }
   }
 
+  // ── Copying ───────────────────────────────────────────────────────────────
+
+  private async copyBugReport(target: Target): Promise<void> {
+    const markdown = reportMarkdown(describeTarget(target), {
+      url: location.href,
+      threeRevision: THREE.REVISION,
+      userAgent: navigator.userAgent,
+    });
+    const image = captureView(target.view, { mimeType: "image/png", maxSize: 1600 }).then(blobOf);
+    // The text is worth having without the picture, and a copy may finish
+    // without ever looking at it.
+    image.catch(() => undefined);
+
+    try {
+      const { picture } = await copyReport(markdown, image);
+      this.setStatus(
+        "ok",
+        picture
+          ? "Copied the report. Pasted as plain text it is Markdown; pasted into a doc or chat, the screenshot comes too."
+          : "Copied the report as Markdown."
+      );
+    } catch (error) {
+      this.setStatus("error", `Could not copy: ${errorText(error)}`);
+    }
+  }
+
+  private async copyScreenshot(target: Target): Promise<void> {
+    const image = captureView(target.view, { mimeType: "image/png" }).then(blobOf);
+    image.catch(() => undefined);
+
+    try {
+      await copyImage(image);
+      this.setStatus("ok", "Copied a screenshot of the canvas.");
+    } catch (error) {
+      this.setStatus("error", `Could not copy: ${errorText(error)}`);
+    }
+  }
+
   // ── Surviving an update or a reload ───────────────────────────────────────
 
   private refreshSoon(): void {
     // R3F applies the new stamp when React re-renders, which follows the
-    // module update by a moment. Twice, so a slow re-render is still caught.
-    for (const delay of [80, 400]) {
-      setTimeout(() => this.refresh(), delay);
-    }
-  }
-
-  private refresh(): void {
-    const selection = this.selection;
-    if (!selection) {
-      return;
-    }
-
-    const scene = selection.view.scene();
-    if (scene && isInside(selection.pick.object, scene)) {
-      selection.pick.resolution = resolveSourceRef(
-        selection.pick.object,
-        selection.pick.instanceId ?? undefined
-      );
-      this.render();
-      return;
-    }
-
-    // The object was replaced — a remount. Find its successor by address.
-    const address = this.lastAddress;
-    const found = address ? this.find(address) : null;
-    if (found) {
-      const status = this.status;
-      this.select(found);
-      this.status = status;
-      this.showStatus();
-    }
-  }
-
-  private lastAddress: Address | null = null;
-
-  private addressOf(selection: Selection): Address | null {
-    const resolved = selection.pick.resolution?.object;
-    const stamp = stampOf(resolved);
-    const scene = selection.view.scene();
-    if (!resolved || !stamp || !scene) {
-      return null;
-    }
-
-    let ordinal = 0;
-    let found = -1;
-    scene.traverse((object) => {
-      const other = stampOf(object);
-      if (other && sameSite(other, stamp)) {
-        if (object === resolved) {
-          found = ordinal;
-        }
-        ordinal++;
-      }
+    // module update by a moment. More than once, so a slow re-render is still
+    // caught, and an object only counts as gone after the last.
+    const delays = [80, 400, 1500];
+    this.refreshGeneration++;
+    const generation = this.refreshGeneration;
+    delays.forEach((delay, index) => {
+      setTimeout(() => {
+        // A later update starts the count again.
+        this.refresh(index === delays.length - 1 && generation === this.refreshGeneration);
+      }, delay);
     });
-
-    return found < 0
-      ? null
-      : {
-          file: stamp.file,
-          line: stamp.line,
-          column: stamp.column,
-          ordinal: found,
-          instanceId: selection.pick.instanceId,
-        };
   }
 
-  private find(address: Address): Selection | null {
-    for (const view of this.discovery.all()) {
-      const scene = view.scene();
-      if (!scene) {
+  /**
+   * Keeps what is still in its scene, and finds a remounted object by address.
+   *
+   * An object missing from its scene is not gone yet. An update that remounts a
+   * component unmounts everything first, so a look in that gap finds nothing,
+   * and dropping what is held then would lose it for good: Vite may follow with
+   * a reload, which restores from what was last saved. Found by an edit to an
+   * entry module, where an assistant's list of two objects came back as one.
+   */
+  private reheld(list: Held[], final: boolean): Held[] {
+    const kept: Held[] = [];
+    for (const held of list) {
+      const scene = held.view.scene();
+      if (scene && isInside(held.pick.object, scene)) {
+        held.pick.resolution = resolveSourceRef(held.pick.object, held.pick.instanceId ?? undefined);
+        held.address = addressOf(held) ?? held.address;
+        kept.push(held);
         continue;
       }
-      let ordinal = 0;
-      let match: THREE.Object3D | null = null;
-      scene.traverse((object) => {
-        const stamp = stampOf(object);
-        if (!match && stamp && sameSite(stamp, address)) {
-          if (ordinal === address.ordinal) {
-            match = object;
-          }
-          ordinal++;
-        }
-      });
-      if (match) {
-        const object = match as THREE.Object3D;
-        return {
-          view,
-          pick: {
-            object,
-            instanceId: address.instanceId,
-            point: object.getWorldPosition(new THREE.Vector3()),
-            distance: 0,
-            resolution: resolveSourceRef(object, address.instanceId ?? undefined),
-          },
-        };
+      const found = held.address ? findAddress(this.discovery, held.address) : null;
+      if (found) {
+        kept.push(this.hold(found));
+      } else if (!final) {
+        kept.push(held);
       }
     }
-    return null;
+    return kept;
+  }
+
+  private refresh(final: boolean): void {
+    // Each write in a save brings its own update. The save refreshes when done.
+    if (this.editors.busy) {
+      return;
+    }
+
+    if (this.selection === null && this.pointing.length === 0 && this.pins.length === 0) {
+      return;
+    }
+
+    this.pointing = this.reheld(this.pointing, final);
+    this.pins = this.reheld(this.pins, final);
+    this.showHeld();
+    this.showPointerState();
+
+    const selection = this.selection;
+
+    if (selection) {
+      const scene = selection.view.scene();
+      if (scene && isInside(selection.pick.object, scene)) {
+        selection.pick.resolution = resolveSourceRef(
+          selection.pick.object,
+          selection.pick.instanceId ?? undefined
+        );
+      } else {
+        // The object was replaced — a remount. Find its successor by address.
+        const found = this.lastAddress ? findAddress(this.discovery, this.lastAddress) : null;
+        if (found) {
+          this.dropDrafts();
+          const status = this.status;
+          this.select(found);
+          this.status = status;
+          this.showStatus();
+          return;
+        }
+      }
+    }
+
+    // Any module's update lands here, a stylesheet's included. Only one that
+    // changed this object's stamp is worth redrawing for, and taking a value
+    // being dragged along with it.
+    if (selection && !sameMarks(marksOf(selection), this.shownMarks)) {
+      this.dropDrafts();
+      this.renderInspect();
+    }
+    this.renderTabs();
+    this.renderToolbar();
+    this.renderCompare();
+    this.renderAgent();
+    this.save();
+    this.publish();
+  }
+
+  /**
+   * The positions behind a draft may have moved, and an edit to them would be
+   * refused anyway. Unsaved work on a stale view is not worth keeping.
+   */
+  private dropDrafts(): void {
+    if (this.editors.count > 0) {
+      this.editors.revert();
+      this.setStatus("error", "The source changed, so unsaved values were put back.");
+    }
   }
 
   private save(): void {
-    this.lastAddress = this.selection ? this.addressOf(this.selection) : null;
+    if (this.restoring) {
+      return;
+    }
+
+    this.lastAddress = this.selection ? addressOf(this.selection) : null;
+    const addresses = (list: Held[]) =>
+      list.map((held) => held.address).filter((address): address is Address => address !== null);
+
     try {
-      const saved: Saved = { inspecting: this.inspecting, selection: this.lastAddress };
+      const saved: Saved = {
+        inspecting: this.inspecting,
+        pointerMode: this.pointerMode,
+        panelOpen: this.panelOpen,
+        tab: this.tab,
+        selection: this.lastAddress,
+        pointing: addresses(this.pointing),
+        pins: addresses(this.pins),
+      };
       sessionStorage.setItem(STORAGE_KEY, JSON.stringify(saved));
     } catch {
       // Storage unavailable: the mode simply does not survive a reload.
@@ -879,15 +1462,19 @@ export class Inspector {
   }
 
   /**
-   * Puts back the mode and selection after a full reload. Saving a value in
-   * a module React cannot hot-swap — often the app's entry — reloads the
-   * page, and losing the panel after every such save would make editing
-   * tedious.
+   * Puts back the mode, the selection, and what is pointed at and pinned after a
+   * full reload. Saving a value in a module React cannot hot-swap — often the
+   * app's entry — reloads the page, and losing all of it after every such save
+   * would make editing tedious. It would also make an assistant that edited a
+   * value lose sight of what the developer pointed it at.
+   *
+   * Until this finishes the server keeps what the page last told it, so an
+   * assistant asking during a reload still gets an answer.
    */
   private restore(): void {
-    let saved: Saved | null = null;
+    let saved: Partial<Saved> | null = null;
     try {
-      saved = JSON.parse(sessionStorage.getItem(STORAGE_KEY) ?? "null") as Saved | null;
+      saved = JSON.parse(sessionStorage.getItem(STORAGE_KEY) ?? "null") as Partial<Saved> | null;
     } catch {
       return;
     }
@@ -895,20 +1482,88 @@ export class Inspector {
       return;
     }
 
-    const started = performance.now();
+    const memory = saved;
+    this.restoring = true;
+    this.tab = memory.tab ?? "inspect";
+
+    let selection = memory.selection ?? null;
+    type Slot = { address: Address; held: Held | null };
+    const slots = (addresses: Address[] | undefined): Slot[] =>
+      (addresses ?? []).map((address) => ({ address, held: null }));
+    const pointing = slots(memory.pointing);
+    const pins = slots(memory.pins);
+    let started: number | null = null;
+
     const attempt = () => {
       this.discovery.refresh();
-      if (saved!.inspecting && this.discovery.all().length > 0) {
-        this.setInspecting(true);
-      }
-      const found = saved!.selection ? this.find(saved!.selection) : null;
-      if (found) {
-        this.select(found);
+      const ready = this.discovery.all().length > 0;
+
+      // No canvas yet says nothing about what will be in it: a slow load, or a
+      // route of a single-page app with no scene on it. Giving up here would
+      // lose what was saved, so the clock only starts once there is a canvas.
+      if (!ready) {
+        setTimeout(attempt, 500);
         return;
       }
-      if (saved!.selection && performance.now() - started < 8000) {
-        setTimeout(attempt, 200);
+      started ??= performance.now();
+
+      if (memory.inspecting && !this.inspecting) {
+        this.pointerMode = memory.pointerMode === true;
+        this.setInspecting(true);
+        this.showPointerState();
       }
+
+      const found = selection ? findAddress(this.discovery, selection) : null;
+      if (found) {
+        selection = null;
+        const tab = this.tab;
+        this.select(found);
+        this.tab = tab;
+        this.showTab();
+        this.renderTabs();
+      }
+
+      // In the order they were saved, however they turn up: "the second one"
+      // has to go on meaning the same object.
+      let changed = false;
+      const take = (wanted: Slot[], current: Held[]): Held[] => {
+        for (const slot of wanted) {
+          const target = slot.held ? null : findAddress(this.discovery, slot.address);
+          if (target) {
+            slot.held = this.hold(target);
+            changed = true;
+          }
+        }
+        const restored = wanted.flatMap((slot) => (slot.held ? [slot.held] : []));
+        return [...restored, ...current.filter((held) => !restored.includes(held))];
+      };
+      this.pointing = take(pointing, this.pointing);
+      this.pins = take(pins, this.pins);
+      if (changed) {
+        this.showHeld();
+        this.showPointerState();
+        this.renderTabs();
+        this.renderToolbar();
+        this.renderCompare();
+        this.renderAgent();
+      }
+
+      // The Inspect tab opens with its selection; the others have nothing to wait for.
+      if (memory.panelOpen && memory.tab !== "inspect" && !this.panelOpen) {
+        this.panelOpen = true;
+        this.render();
+      }
+
+      const waiting =
+        selection !== null || [...pointing, ...pins].some((slot) => slot.held === null);
+      if (waiting && performance.now() - started < 8000) {
+        setTimeout(attempt, 200);
+        return;
+      }
+
+      this.restoring = false;
+      this.save();
+      this.publish();
     };
     setTimeout(attempt, 100);
   }
@@ -988,7 +1643,10 @@ export class Inspector {
       selection: () => this.describe(),
       describeAt: (x: number, y: number) => this.describeAt(x, y),
       screenPointOf: (file: string, line: number) => this.screenPointOf(file, line),
-      clear: () => this.select(null),
+      clear: () => this.closePanel(),
+      pointing: () => this.pointing.map(labelOf),
+      pins: () => this.pins.map(labelOf),
+      looking: () => this.agent?.looking() ?? [],
     };
   }
 }

@@ -23,6 +23,7 @@ export class View {
   readonly layer = new HighlightLayer();
   lastFrameAt = 0;
   private readonly seen = new Map<THREE.Scene, { camera: THREE.Camera; at: number }>();
+  private screenFrameWaiters = new Set<() => void>();
 
   constructor(
     readonly renderer: THREE.WebGLRenderer,
@@ -108,6 +109,33 @@ export class View {
         this.renderer.render(main.scene, main.camera);
       }
     }, 100);
+  }
+
+  /** Calls back once, after the next frame that reaches the screen. Returns a cancel. */
+  afterScreenFrame(callback: () => void): () => void {
+    this.screenFrameWaiters.add(callback);
+    return () => this.screenFrameWaiters.delete(callback);
+  }
+
+  /** A frame just finished. Passes drawn into a render target are not on screen yet. */
+  frameFinished(): void {
+    if (this.screenFrameWaiters.size > 0 && this.renderer.getRenderTarget() === null) {
+      const waiters = this.screenFrameWaiters;
+      this.screenFrameWaiters = new Set();
+      for (const waiter of waiters) {
+        waiter();
+      }
+    }
+  }
+
+  /** Draws the main scene right now. False when there is nothing known to draw. */
+  drawNow(): boolean {
+    const main = this.main();
+    if (!main) {
+      return false;
+    }
+    this.renderer.render(main.scene, main.camera);
+    return true;
   }
 
   /** On screen and not removed from the page. */
@@ -196,6 +224,7 @@ export class Discovery {
     renderer.render = function (this: THREE.WebGLRenderer, scene, camera) {
       view.frame(scene, camera);
       const result = render.call(this, scene, camera);
+      view.frameFinished();
       for (const listener of frameListeners) {
         listener(view);
       }

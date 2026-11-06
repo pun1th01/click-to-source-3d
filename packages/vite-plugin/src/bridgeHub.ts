@@ -24,6 +24,8 @@ export type BridgeEnvelope = { requestId: string; query: BridgeQuery };
  */
 export type BridgeChannel = {
   send: (envelope: BridgeEnvelope) => void;
+  /** Tells the page something it did not ask. Only the websocket can. */
+  emit?: (event: string, data: unknown) => void;
   /** Ends the connection when the dev server shuts down, if the hub owns it. */
   close?: () => void;
 };
@@ -174,6 +176,28 @@ export class BridgeHub {
 
   pageCount(): number {
     return this.pages.size;
+  }
+
+  /** The session of each page now open. */
+  sessions(): Array<string | null> {
+    return [...this.pages.values()].map((page) => page.session);
+  }
+
+  /**
+   * Tells every attached page something.
+   *
+   * Only attached pages, not every socket on the server: under `vite --host` a
+   * socket can belong to the network, and the attach step is what keeps those
+   * out.
+   */
+  broadcast(event: string, data: unknown): void {
+    for (const page of this.pages.values()) {
+      try {
+        page.channel.emit?.(event, data);
+      } catch {
+        // A page going away as this is sent has nothing left to tell.
+      }
+    }
   }
 
   /**

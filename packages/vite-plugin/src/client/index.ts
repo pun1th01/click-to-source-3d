@@ -4,6 +4,7 @@ import {
   setBridgeScene,
   type HotChannel,
 } from "@click-to-source-3d/core/devtools";
+import { AgentLink } from "./agentLink.js";
 import { Discovery, type R3FRoots } from "./discovery.js";
 import { Inspector } from "./inspector.js";
 
@@ -41,9 +42,16 @@ export function startDevtools(setup: {
   const discovery = new Discovery(setup.r3fRoots ?? null);
   discovery.install();
 
+  // Before the inspector, whose first act can be to tell the server what is
+  // pointed at, and the server only listens to a page that has said hello.
+  const agent = options.bridge && hot ? new AgentLink(discovery, hot) : null;
+  if (agent && hot) {
+    connectBridgeOverHot(hot, agent.answer);
+  }
+
   let inspector: Inspector | null = null;
   if (options.inspector) {
-    inspector = new Inspector(discovery, { hotkey: options.hotkey, button: options.button }, hot);
+    inspector = new Inspector(discovery, { hotkey: options.hotkey, button: options.button }, hot, agent);
     const mount = () => inspector!.mount();
     if (document.readyState === "loading") {
       document.addEventListener("DOMContentLoaded", mount, { once: true });
@@ -52,9 +60,7 @@ export function startDevtools(setup: {
     }
   }
 
-  if (options.bridge && hot) {
-    connectBridgeOverHot(hot);
-
+  if (agent) {
     // The bridge answers about the main canvas. Re-attached only when the
     // scene or camera actually changes: each attach advances the bridge's
     // generation counter, which an agent reads as "the scene was replaced".

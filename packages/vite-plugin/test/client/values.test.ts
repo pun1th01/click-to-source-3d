@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, expect, it } from "vitest";
-import { draftOf, parseDraft } from "../../src/client/values.js";
+import { draftOf, parseDraft, sliderRange, sliderText } from "../../src/client/values.js";
 import { matchesHotkey, parseHotkey } from "../../src/client/inspector.js";
 
 describe("draftOf", () => {
@@ -65,5 +65,57 @@ describe("the inspect hotkey", () => {
   it("accepts other spellings of a shortcut", () => {
     const custom = parseHotkey("Ctrl + Shift + 1");
     expect(matchesHotkey(press({ ctrlKey: true, shiftKey: true, code: "Digit1", key: "!" }), custom)).toBe(true);
+  });
+});
+
+describe("sliderRange", () => {
+  it("runs from nothing to one for what only means that", () => {
+    expect(sliderRange("roughness", 0.4)).toEqual({ min: 0, max: 1, step: 0.01 });
+    expect(sliderRange("material-opacity", 1)).toEqual({ min: 0, max: 1, step: 0.01 });
+  });
+
+  it("makes whole steps for segments, and never goes below one", () => {
+    expect(sliderRange("widthSegments", 32)).toEqual({ min: 1, max: 64, step: 1 });
+    expect(sliderRange("radialSegments", 100)).toEqual({ min: 1, max: 200, step: 1 });
+  });
+
+  it("gives a rotation a full turn either way", () => {
+    expect(sliderRange("rotation", 0)).toMatchObject({ min: -Math.PI, max: Math.PI });
+    expect(sliderRange("rotation-y", 5)).toMatchObject({ min: -Math.PI, max: 5 });
+  });
+
+  it("does not take a size below zero", () => {
+    expect(sliderRange("radius", 2)).toMatchObject({ min: 0, max: 6 });
+    expect(sliderRange("intensity", 0)).toMatchObject({ min: 0, max: 1 });
+    expect(sliderRange("height", 1.4)).toMatchObject({ min: 0 });
+  });
+
+  it("reaches either way from anything else", () => {
+    expect(sliderRange("position", 6)).toMatchObject({ min: 0, max: 12 });
+    expect(sliderRange("position", -2.2)).toMatchObject({ min: -4.4, max: 0 });
+    expect(sliderRange("position", 0)).toMatchObject({ min: -2, max: 2 });
+  });
+
+  // A negative "size" is a deliberate value, not one to be clamped away.
+  it("always keeps the value itself in range", () => {
+    for (const [name, value] of [["scale", -2], ["roughness", 3], ["rotation", 10], ["width", 100000], ["x", 1e-6]] as const) {
+      const range = sliderRange(name, value);
+      expect(range.min).toBeLessThanOrEqual(value);
+      expect(range.max).toBeGreaterThanOrEqual(value);
+    }
+  });
+
+  it("takes a step in proportion to the range", () => {
+    expect(sliderRange("position", 0).step).toBe(0.01);
+    expect(sliderRange("width", 1000).step).toBe(10);
+  });
+});
+
+describe("sliderText", () => {
+  it("writes a number worth reading, not floating-point noise", () => {
+    expect(sliderText(1.2000000000000002, 0.01)).toBe("1.2");
+    expect(sliderText(3.14159, 0.01)).toBe("3.14");
+    expect(sliderText(32, 1)).toBe("32");
+    expect(sliderText(1200, 10)).toBe("1200");
   });
 });

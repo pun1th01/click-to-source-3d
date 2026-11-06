@@ -1,4 +1,7 @@
 import {
+  AGENT_REPORT_PATH,
+  AGENT_SELECTION_EVENT,
+  AGENT_STATE_EVENT,
   BRIDGE_EVENTS_PATH,
   BRIDGE_HELLO_EVENT,
   BRIDGE_QUERY_EVENT,
@@ -15,6 +18,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { AgentHub } from "./agentHub.js";
 import { BridgeHub } from "./bridgeHub.js";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { Plugin, ResolvedConfig } from "vite";
@@ -210,6 +214,7 @@ export function clickToSource(options: ClickToSourceOptions = {}): Plugin {
         };
   const injecting = inspector !== null || bridging;
   const hub = new BridgeHub();
+  const agents = new AgentHub((event, data) => hub.broadcast(event, data));
   let warnedAboutOrder = false;
 
   return {
@@ -397,7 +402,10 @@ export function clickToSource(options: ClickToSourceOptions = {}): Plugin {
       };
 
       if (bridging) {
-        server.httpServer?.on("close", () => hub.dispose());
+        server.httpServer?.on("close", () => {
+          hub.dispose();
+          agents.dispose();
+        });
 
         // The injected inspector's transport: Vite's own HMR websocket, which
         // is already open to every page and refuses a browser on a foreign
@@ -407,6 +415,7 @@ export function clickToSource(options: ClickToSourceOptions = {}): Plugin {
         // A page is keyed by its socket, so a repeat hello after a reconnect
         // replaces it, and the socket closing removes it.
         const remoteAddresses = new WeakMap<object, string | undefined>();
+        const attached = new WeakMap<object, { pageId: number; session: string | null; url: string }>();
 
         server.ws.on("connection", (socket: object, request?: IncomingMessage) => {
           remoteAddresses.set(socket, request?.socket?.remoteAddress);
@@ -416,28 +425,49 @@ export function clickToSource(options: ClickToSourceOptions = {}): Plugin {
           const hello = (data ?? {}) as { session?: unknown; url?: unknown };
           const socket = (client as { socket?: { once?: (e: string, f: () => void) => void } })
             .socket;
-          const key = socket ?? client;
+          const key = (socket ?? client) as object;
 
           if (
             !requestOptions.allowRemote &&
-            !isLoopbackAddress(remoteAddresses.get(key as object))
+            !isLoopbackAddress(remoteAddresses.get(key))
           ) {
             return;
           }
 
-          hub.attach(
-            { send: (envelope) => client.send(BRIDGE_QUERY_EVENT, envelope) },
+          const session = typeof hello.session === "string" ? hello.session : null;
+          const url = typeof hello.url === "string" ? hello.url : "unknown";
+          const pageId = hub.attach(
             {
-              key,
-              session: typeof hello.session === "string" ? hello.session : null,
-              url: typeof hello.url === "string" ? hello.url : "unknown",
-            }
+              send: (envelope) => client.send(BRIDGE_QUERY_EVENT, envelope),
+              emit: (event, payload) => client.send(event, payload),
+            },
+            { key, session, url }
           );
-          socket?.once?.("close", () => hub.detach(key));
+
+          if (!attached.has(key)) {
+            socket?.once?.("close", () => {
+              hub.detach(key);
+              const page = attached.get(key);
+              if (page) {
+                agents.pageLeft(page);
+              }
+            });
+          }
+          attached.set(key, { pageId, session, url });
+          client.send(AGENT_STATE_EVENT, agents.state());
         });
 
         server.ws.on(BRIDGE_REPLY_EVENT, (data) => {
           hub.handleReply((data ?? {}) as { requestId?: string; result?: unknown });
+        });
+
+        // Only from a socket that passed the check above and said hello.
+        server.ws.on(AGENT_SELECTION_EVENT, (data, client) => {
+          const key = ((client as { socket?: object }).socket ?? client) as object;
+          const page = attached.get(key);
+          if (page) {
+            agents.setSelection(page, data);
+          }
         });
       }
 
@@ -487,7 +517,8 @@ export function clickToSource(options: ClickToSourceOptions = {}): Plugin {
         if (
           pathname === BRIDGE_EVENTS_PATH ||
           pathname === BRIDGE_REPLY_PATH ||
-          pathname === BRIDGE_QUERY_PATH
+          pathname === BRIDGE_QUERY_PATH ||
+          pathname === AGENT_REPORT_PATH
         ) {
           const refusal = checkCaller(request, {
             allowedOrigins: serverOrigins(),
@@ -515,6 +546,16 @@ export function clickToSource(options: ClickToSourceOptions = {}): Plugin {
           return;
         }
 
+        if (pathname === AGENT_REPORT_PATH) {
+          void handleBridgePost(request, response, (body) => {
+            if (bridging) {
+              agents.report(body);
+            }
+            return { ok: true };
+          });
+          return;
+        }
+
         if (pathname === BRIDGE_QUERY_PATH) {
           void handleBridgePost(request, response, async (body) => {
             if (!bridging) {
@@ -531,6 +572,10 @@ export function clickToSource(options: ClickToSourceOptions = {}): Plugin {
               pageId?: number;
               timeoutMs?: number;
             };
+
+            if (query?.kind === "get_selection") {
+              return agents.selectionOutcome(hub.sessions());
+            }
 
             return hub.query(query, { pageId, timeoutMs });
           });

@@ -66,13 +66,28 @@ present.
   render loop. One instance of an `InstancedMesh` is highlighted on its own.
 - **Panel** — the component, file and line with an Open button; every prop
   stamped on the element and its geometry and material, literals as editable
-  fields; an instance's transform; mesh details. Enter saves a value.
-- **Reloads** — inspect mode and the selection survive a full page reload,
-  such as the one Vite does after an edit to your entry module.
+  fields; an instance's transform; what the object costs to draw; mesh details.
+- **Live preview** — a slider or a typed number changes the live object at once,
+  rebuilding a geometry from its `parameters` when the value is one of its
+  `args`. Nothing is written until Enter or Save, and Revert, Esc or selecting
+  something else puts it back. Every field showing one constant moves together.
+- **Pointer** — the pointer button, or Shift+click in inspect mode, marks objects
+  for an AI assistant, which reads them through the MCP server's `get_selection`.
+  The button shows only while an assistant is connected or something is marked.
+- **Agent tab** — who is connected, what is pointed at, and every tool call. Calls
+  are reported by the MCP server, and the dev server keeps the last 200 for a page
+  that opens later.
+- **Compare tab** — two pinned objects, or a pin and the selection, row by row.
+- **Report and Image** — copy the object as Markdown, with a screenshot for targets
+  that take rich text, or copy just the screenshot. Over plain http on another
+  machine, where browsers offer no clipboard API, Report copies text only and
+  Image is not available.
+- **Reloads** — inspect mode, the selection, pins and what is pointed at survive a
+  full page reload, such as the one Vite does after an edit to your entry module.
 
 `window.__CTS_DEVTOOLS__` exposes the inspector's state for tests:
 `setInspecting`, `isInspecting`, `selection`, `describeAt`, `screenPointOf`,
-`clear`.
+`clear`, `pointing`, `pins`, `looking`.
 
 ## Endpoints
 
@@ -84,6 +99,7 @@ inside Vite's `server.fs.allow` — in a monorepo, the workspace.
     /__cts/write-file    rewrite one literal, by exact position or by name
     /__cts/open          open a file at a line in your editor
     /__cts/bridge/query  ask the open page about its scene
+    /__cts/agent/report  an assistant saying it is here, and what it just did
 
 An edit by position names the literal's line, column and current text; if the
 text there has changed, it is refused with `STALE_LOCATION`. Files are written
