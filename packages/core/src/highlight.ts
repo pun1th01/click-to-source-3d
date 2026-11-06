@@ -6,12 +6,22 @@ export type HighlightTarget = {
   instanceId?: number | null;
 };
 
-export type HighlightKind = "hover" | "selected";
+/**
+ * What a box means, which is what its colour tells the developer: under the
+ * pointer, pinned for comparison, being looked at by their assistant, pointed
+ * out to their assistant, or selected.
+ */
+export type HighlightKind = "hover" | "pinned" | "agent" | "pointed" | "selected";
 
 const STYLES: Record<HighlightKind, { color: number; fill: number; order: number }> = {
-  hover: { color: 0xffffff, fill: 0.06, order: 9998 },
+  hover: { color: 0xffffff, fill: 0.06, order: 9995 },
+  pinned: { color: 0x6aa9ff, fill: 0.06, order: 9996 },
+  agent: { color: 0xb18cff, fill: 0.07, order: 9997 },
+  pointed: { color: 0xf5b13d, fill: 0.12, order: 9998 },
   selected: { color: 0x3cc2b8, fill: 0.14, order: 9999 },
 };
+
+const KINDS = Object.keys(STYLES) as HighlightKind[];
 
 // One unit cube, shared: a slot is that cube transformed onto its target.
 const UNIT_BOX = new THREE.BoxGeometry(1, 1, 1);
@@ -27,7 +37,13 @@ const _identity = new THREE.Quaternion();
 // box matrix and leave nothing to draw.
 const MIN_SIZE = new THREE.Vector3(1e-4, 1e-4, 1e-4);
 
-type Slot = { group: THREE.Group; target: HighlightTarget | null };
+/** Every box of one kind. A box is made the first time it is needed, and kept. */
+type Slot = {
+  targets: HighlightTarget[];
+  boxes: THREE.Group[];
+  edges: THREE.LineBasicMaterial;
+  fill: THREE.MeshBasicMaterial;
+};
 
 /**
  * Writes into `out` the matrix that maps a unit cube onto the target's box.
@@ -123,59 +139,78 @@ export class HighlightLayer {
 
   constructor() {
     this.scene.name = "click-to-source highlight";
-    this.slots = {
-      hover: this.makeSlot("hover"),
-      selected: this.makeSlot("selected"),
-    };
+    this.slots = Object.fromEntries(KINDS.map((kind) => [kind, this.makeSlot(kind)])) as Record<
+      HighlightKind,
+      Slot
+    >;
   }
 
   private makeSlot(kind: HighlightKind): Slot {
     const style = STYLES[kind];
-    const group = new THREE.Group();
-    group.matrixAutoUpdate = false;
-    group.visible = false;
 
-    const edges = new THREE.LineSegments(
-      UNIT_EDGES,
-      new THREE.LineBasicMaterial({
+    return {
+      targets: [],
+      boxes: [],
+      edges: new THREE.LineBasicMaterial({
         color: style.color,
         depthTest: false,
         depthWrite: false,
         transparent: true,
         opacity: 0.95,
-      })
-    );
-    const fill = new THREE.Mesh(
-      UNIT_BOX,
-      new THREE.MeshBasicMaterial({
+      }),
+      fill: new THREE.MeshBasicMaterial({
         color: style.color,
         depthTest: false,
         depthWrite: false,
         transparent: true,
         opacity: style.fill,
-      })
-    );
-    edges.renderOrder = fill.renderOrder = style.order;
+      }),
+    };
+  }
+
+  private makeBox(kind: HighlightKind, slot: Slot): THREE.Group {
+    const group = new THREE.Group();
+    group.matrixAutoUpdate = false;
+    group.visible = false;
+
+    const edges = new THREE.LineSegments(UNIT_EDGES, slot.edges);
+    const fill = new THREE.Mesh(UNIT_BOX, slot.fill);
+    edges.renderOrder = fill.renderOrder = STYLES[kind].order;
     group.add(fill, edges);
     this.scene.add(group);
 
-    return { group, target: null };
+    return group;
   }
 
-  /** Points a box at a target, or hides it. */
+  /** Points the first box of a kind at a target, or hides every box of it. */
   set(kind: HighlightKind, target: HighlightTarget | null): void {
+    this.setAll(kind, target ? [target] : []);
+  }
+
+  /** Points as many boxes of a kind as there are targets. */
+  setAll(kind: HighlightKind, targets: HighlightTarget[]): void {
     const slot = this.slots[kind];
-    slot.target = target;
-    slot.group.visible = target !== null;
+    slot.targets = targets;
+
+    while (slot.boxes.length < targets.length) {
+      slot.boxes.push(this.makeBox(kind, slot));
+    }
+    slot.boxes.forEach((box, index) => {
+      box.visible = index < targets.length;
+    });
   }
 
   get(kind: HighlightKind): HighlightTarget | null {
-    return this.slots[kind].target;
+    return this.slots[kind].targets[0] ?? null;
+  }
+
+  all(kind: HighlightKind): readonly HighlightTarget[] {
+    return this.slots[kind].targets;
   }
 
   /** Whether anything is shown, so a caller can skip the pass entirely. */
   get active(): boolean {
-    return this.slots.hover.target !== null || this.slots.selected.target !== null;
+    return KINDS.some((kind) => this.slots[kind].targets.length > 0);
   }
 
   /**
@@ -184,21 +219,18 @@ export class HighlightLayer {
    */
   update(): void {
     for (const slot of Object.values(this.slots)) {
-      if (!slot.target) {
-        continue;
-      }
-      const fitted = boxMatrixFor(slot.target, slot.group.matrix);
-      slot.group.visible = fitted;
-      slot.group.matrixWorldNeedsUpdate = true;
+      slot.targets.forEach((target, index) => {
+        const box = slot.boxes[index];
+        box.visible = boxMatrixFor(target, box.matrix);
+        box.matrixWorldNeedsUpdate = true;
+      });
     }
   }
 
   dispose(): void {
     for (const slot of Object.values(this.slots)) {
-      slot.group.traverse((child) => {
-        const material = (child as THREE.Mesh).material as THREE.Material | undefined;
-        material?.dispose();
-      });
+      slot.edges.dispose();
+      slot.fill.dispose();
     }
   }
 }
@@ -242,11 +274,20 @@ export function attachHighlight(
     drawing = true;
     const autoClear = this.autoClear;
     this.autoClear = false;
+    // A render resets the renderer's frame counters, so without this they
+    // would describe the highlight's two boxes rather than the application's
+    // frame, for as long as anything is highlighted, in anything that reads
+    // them: an FPS panel, r3f-perf, the inspector's own numbers.
+    const counters = this.info?.render;
+    const frame = counters && { ...counters };
     try {
       layer.update();
       original.call(this, layer.scene, target);
     } finally {
       this.autoClear = autoClear;
+      if (counters && frame) {
+        Object.assign(counters, frame);
+      }
       drawing = false;
     }
   };

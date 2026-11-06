@@ -57,7 +57,8 @@ variant — is not recoverable from the mesh. Write
     @click-to-source-3d/core/probe     deprecated no-op, removed in 0.2.0
 
 `devtools` is what the plugin's inspector is made of, for building a different
-one: `pickAt` (the visible object under a point, resolved to its source),
+one: `measureObject` (what drawing an object and everything under it costs),
+`pickAt` (the visible object under a point, resolved to its source),
 `HighlightLayer` and `attachHighlight` (a box drawn after a renderer's frame,
 without taking over its loop), `describeMesh`, `editSourceAt` and
 `editSourceFile` (edits through the plugin's endpoint), and

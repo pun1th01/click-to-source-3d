@@ -9,6 +9,8 @@
 export { describeMesh } from "./meshDetails.js";
 export type { GeometryDetails, MaterialDetails, MeshDetails } from "./meshDetails.js";
 
+export { measureObject } from "./meshStats.js";
+
 export {
   editSourceFile,
   editSourceAt,
@@ -24,4 +26,4 @@ export { pickAt, ndcFromClient } from "./picking.js";
 export type { Pick } from "./picking.js";
 
 export { connectBridgeOverHot, setBridgeScene } from "./bridgeClient.js";
-export type { HotChannel } from "./bridgeClient.js";
+export type { BridgeExtension, HotChannel } from "./bridgeClient.js";

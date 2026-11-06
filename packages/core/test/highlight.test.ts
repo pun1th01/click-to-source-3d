@@ -92,6 +92,74 @@ function fakeRenderer() {
   return { renderer: renderer as unknown as THREE.WebGLRenderer, calls, raw: renderer };
 }
 
+describe("HighlightLayer", () => {
+  const mesh = (x = 0) => {
+    const object = new THREE.Mesh(new THREE.BoxGeometry());
+    object.position.x = x;
+    return object;
+  };
+  const shown = (layer: HighlightLayer) => layer.scene.children.filter((child) => child.visible).length;
+
+  it("shows one box for each target", () => {
+    const layer = new HighlightLayer();
+
+    layer.setAll("pointed", [{ object: mesh() }, { object: mesh(5) }, { object: mesh(9) }]);
+    layer.update();
+
+    expect(shown(layer)).toBe(3);
+    expect(layer.all("pointed")).toHaveLength(3);
+  });
+
+  it("hides the boxes it no longer needs, and reuses them", () => {
+    const layer = new HighlightLayer();
+    layer.setAll("pointed", [{ object: mesh() }, { object: mesh(5) }]);
+    const built = layer.scene.children.length;
+
+    layer.setAll("pointed", [{ object: mesh(1) }]);
+    layer.update();
+    expect(shown(layer)).toBe(1);
+
+    layer.setAll("pointed", [{ object: mesh(1) }, { object: mesh(2) }]);
+    layer.update();
+    expect(shown(layer)).toBe(2);
+    expect(layer.scene.children).toHaveLength(built);
+  });
+
+  it("keeps each kind's boxes apart", () => {
+    const layer = new HighlightLayer();
+    const selected = { object: mesh() };
+
+    layer.set("selected", selected);
+    layer.setAll("pointed", [{ object: mesh(5) }]);
+    layer.setAll("agent", [{ object: mesh(7) }]);
+    layer.setAll("pointed", []);
+
+    expect(layer.get("selected")).toBe(selected);
+    expect(layer.get("pointed")).toBeNull();
+    expect(layer.all("agent")).toHaveLength(1);
+  });
+
+  it("is active while any kind has a target", () => {
+    const layer = new HighlightLayer();
+    expect(layer.active).toBe(false);
+
+    layer.setAll("agent", [{ object: mesh() }]);
+    expect(layer.active).toBe(true);
+
+    layer.set("agent", null);
+    expect(layer.active).toBe(false);
+  });
+
+  it("hides a box whose target has nothing to draw around", () => {
+    const layer = new HighlightLayer();
+
+    layer.setAll("pointed", [{ object: new THREE.Group() }, { object: mesh() }]);
+    layer.update();
+
+    expect(shown(layer)).toBe(1);
+  });
+});
+
 describe("attachHighlight", () => {
   const appScene = new THREE.Scene();
   const camera = new THREE.PerspectiveCamera();
@@ -132,6 +200,28 @@ describe("attachHighlight", () => {
     renderer.render(appScene, camera);
 
     expect(calls.map((c) => c.scene)).toEqual([appScene]);
+  });
+
+  // A render resets the counters, so they would otherwise describe the
+  // highlight's boxes for as long as anything is highlighted: wrong in an FPS
+  // panel, in r3f-perf, and in the inspector's own numbers.
+  it("leaves the renderer's frame counters describing the application's frame", () => {
+    const { renderer, raw } = fakeRenderer();
+    const info = { render: { calls: 0, triangles: 0, frame: 0 } };
+    Object.assign(raw, { info });
+    const draw = raw.render;
+    raw.render = function (this: typeof raw, scene: THREE.Object3D) {
+      draw.call(this, scene);
+      const isApp = scene === appScene;
+      info.render = Object.assign(info.render, { calls: isApp ? 40 : 2, triangles: isApp ? 9000 : 24, frame: info.render.frame + 1 });
+    };
+    const layer = new HighlightLayer();
+    layer.set("selected", { object: new THREE.Mesh(new THREE.BoxGeometry()) });
+    attachHighlight(renderer, layer, () => camera);
+
+    renderer.render(appScene, camera);
+
+    expect(info.render).toEqual({ calls: 40, triangles: 9000, frame: 1 });
   });
 
   it("removes its wrapper, and leaves a later one in place", () => {

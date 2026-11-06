@@ -237,7 +237,153 @@ export type BridgeStatus =
   | "ambiguous"
   | "ready";
 
+/**
+ * Names objects in the running scene from outside it: every object stamped at
+ * a line, or with `ordinal`, one of them, or with `instanceId`, one instance.
+ */
+export type ObjectRef = {
+  file: string;
+  line: number;
+  ordinal?: number;
+  instanceId?: number;
+};
+
 export type BridgeQuery =
   | { kind: "resolve_at_point"; x: number; y: number }
   | { kind: "get_instance_provenance"; address: ProvenanceAddress }
-  | { kind: "list_scene_provenance" };
+  | { kind: "list_scene_provenance" }
+  /** Answered by the dev server, from what the page last published. */
+  | { kind: "get_selection" }
+  /** Outlines objects on the developer's screen; an empty list clears them. */
+  | { kind: "highlight_objects"; targets: ObjectRef[]; seconds?: number }
+  /** A picture of the main canvas, as the developer sees it. */
+  | { kind: "capture_canvas"; maxSize?: number };
+
+/** Where an assistant reports itself and each tool call it makes. */
+export const AGENT_REPORT_PATH = "/__cts/agent/report";
+
+/**
+ * Agent events on Vite's HMR websocket.
+ *
+ * SELECTION goes from the page to the dev server whenever what the developer
+ * has selected or pointed at changes. STATE and ACTIVITY go the other way:
+ * STATE is the whole picture, sent when a page says hello and when an
+ * assistant comes or goes; ACTIVITY is one more tool call.
+ */
+export const AGENT_SELECTION_EVENT = "cts:agent:selection";
+export const AGENT_STATE_EVENT = "cts:agent:state";
+export const AGENT_ACTIVITY_EVENT = "cts:agent:activity";
+
+/** An assistant connected through the MCP server. */
+export type AgentInfo = {
+  /** Identifies one MCP server process. */
+  id: string;
+  /** As a person would write it: "Claude Code". */
+  name: string;
+  /** When its last tool call finished, if it has made one. */
+  lastCallAt: number | null;
+};
+
+/** What a line in the activity log can lead to. */
+export type ActivityTarget = ObjectRef & { column?: number };
+
+/**
+ * One tool call, in plain words.
+ *
+ * `effect` says what the call did to the developer's world: `read` left it
+ * alone, `edit` changed a source file, `point` drew on their screen.
+ */
+export type AgentActivity = {
+  /** Assigned by the dev server, increasing. */
+  id: number;
+  /** Assigned by the dev server, when it heard about the call. */
+  at: number;
+  agent: string;
+  tool: string;
+  /** What was asked: `src/World.tsx lines 21-61`. May be empty. */
+  detail: string;
+  /** What came back: `9 objects`, `1.5 -> 2.5`. */
+  result: string;
+  status: "ok" | "error";
+  effect: "read" | "edit" | "point";
+  durationMs: number;
+  targets: ActivityTarget[];
+};
+
+/** What the MCP server sends: itself, and the call it just finished, if any. */
+export type AgentReport = {
+  agent: { id: string; name: string };
+  activity?: Omit<AgentActivity, "id" | "at" | "agent">;
+  /** The assistant has gone away. */
+  leaving?: boolean;
+};
+
+export type AgentState = { agents: AgentInfo[]; log: AgentActivity[] };
+
+/**
+ * What drawing one object costs, across itself and everything under it.
+ *
+ * `drawCalls` and `triangles` are what one frame asks of the GPU if all of it
+ * is on screen, before shadow passes. They are worked out from the object, not
+ * measured, so a culled object still reports what it would cost.
+ */
+export type ObjectCost = {
+  meshes: number;
+  drawCalls: number;
+  triangles: number;
+  vertices: number;
+  /** One InstancedMesh's instances. Null when the object is not instanced. */
+  instances: number | null;
+  /** Vertex and index buffers. */
+  geometryBytes: number;
+  materials: number;
+  textures: Array<{
+    /** The material property holding it: `map`, `normalMap`. */
+    slot: string;
+    width: number | null;
+    height: number | null;
+    /** An estimate of GPU memory, mipmaps included. Null when unknown. */
+    bytes: number | null;
+  }>;
+  /** Estimated GPU memory across `textures`. */
+  textureBytes: number;
+  /** Drawn again for every shadow-casting light that reaches it. */
+  castsShadow: boolean;
+};
+
+/**
+ * One object the developer selected or pointed at, as an assistant reads it.
+ *
+ * `props` carry the exact position of each value, which is what
+ * `edit_parameter` takes to rewrite one.
+ */
+export type PointedObject = {
+  kind: string;
+  name: string | null;
+  /** Set when one instance of an InstancedMesh is meant. */
+  instanceId: number | null;
+  /** Null when nothing in the object's parent chain names a source. */
+  source: { file: string; function: string; line: number; column?: number } | null;
+  address: ProvenanceAddress | null;
+  /** The chain of parents, nearest first, for an object with no source. */
+  parents: string[];
+  props: StampedProp[];
+  /** Where it is. For an instance, that instance's placement. */
+  transform: {
+    position: number[];
+    rotation: number[];
+    scale: number[];
+    worldPosition: number[];
+  };
+  /** Each material's type and colour: `MeshStandardMaterial #c2643c`. */
+  materials: string[];
+  cost: ObjectCost | null;
+};
+
+/** What a page publishes as AGENT_SELECTION_EVENT. */
+export type PageSelection = {
+  /** What the developer deliberately pointed the assistant at, in order. */
+  pointing: PointedObject[];
+  /** The object open in the inspector's panel, if any. */
+  selected: PointedObject | null;
+};

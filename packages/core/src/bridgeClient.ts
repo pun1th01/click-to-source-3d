@@ -199,7 +199,17 @@ export function answerBridgeQuery(query: BridgeQuery): unknown {
     return { status: "ready", generation, address: null, sourceRef: null };
   }
 
-  // get_instance_provenance
+  if (query.kind !== "get_instance_provenance") {
+    // Asks for something only the injected inspector can do, of a page that
+    // reached the bridge another way: <ClickToSourceBridge />, which has no
+    // canvas to photograph and no highlight of its own to draw with.
+    return {
+      status: "unsupported",
+      generation,
+      reason: `${query.kind} needs the injected inspector. Remove <ClickToSourceBridge /> from the page.`,
+    };
+  }
+
   const entry = findByAddress(query.address);
 
   if (!entry) {
@@ -315,6 +325,13 @@ export type HotChannel = {
 };
 
 /**
+ * Lets the page answer queries the scene alone cannot: ones that draw on the
+ * screen or read the canvas. Returns undefined for a query it leaves to the
+ * bridge. An answer that takes a frame to produce can be a promise.
+ */
+export type BridgeExtension = (query: BridgeQuery) => unknown;
+
+/**
  * Answers queries over Vite's HMR websocket, the transport the injected
  * inspector uses.
  *
@@ -323,7 +340,7 @@ export type HotChannel = {
  * reconnects — after a dev-server restart the server has forgotten it — and
  * the server recognises a repeat hello from the same socket as the same page.
  */
-export function connectBridgeOverHot(hot: HotChannel): () => void {
+export function connectBridgeOverHot(hot: HotChannel, extend?: BridgeExtension): () => void {
   const hello = () => {
     hot.send(BRIDGE_HELLO_EVENT, {
       session: sessionId(),
@@ -331,7 +348,30 @@ export function connectBridgeOverHot(hot: HotChannel): () => void {
     });
   };
 
+  const failure = (error: unknown) => ({
+    status: "error",
+    generation,
+    message: error instanceof Error ? error.message : "query failed",
+  });
+
   const onQuery = (envelope: { requestId?: string; query?: BridgeQuery }) => {
+    if (extend && envelope?.requestId && envelope.query) {
+      let extended: unknown;
+      try {
+        extended = extend(envelope.query);
+      } catch (error) {
+        extended = failure(error);
+      }
+
+      if (extended !== undefined) {
+        const requestId = envelope.requestId;
+        void Promise.resolve(extended)
+          .catch(failure)
+          .then((result) => hot.send(BRIDGE_REPLY_EVENT, { requestId, result }));
+        return;
+      }
+    }
+
     const answer = reply(envelope);
     if (answer) {
       hot.send(BRIDGE_REPLY_EVENT, answer);

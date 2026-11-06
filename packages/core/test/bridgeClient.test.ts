@@ -255,4 +255,81 @@ describe("connectBridgeOverHot", () => {
     emit("cts:bridge:query", { requestId: "q2", query: { kind: "list_scene_provenance" } });
     expect(sent).toHaveLength(3);
   });
+
+  describe("with an extension", () => {
+    const capture = { kind: "capture_canvas" };
+
+    it("lets it answer what it knows", async () => {
+      const { connectBridgeOverHot } = await import("../src/bridgeClient.js");
+      const { hot, sent, emit } = fakeHot();
+
+      connectBridgeOverHot(hot, (query) => (query.kind === "capture_canvas" ? { status: "ready", data: "x" } : undefined));
+      emit("cts:bridge:query", { requestId: "q1", query: capture });
+      await Promise.resolve();
+      await Promise.resolve();
+
+      expect(sent.at(-1)).toEqual({
+        event: "cts:bridge:reply",
+        data: { requestId: "q1", result: { status: "ready", data: "x" } },
+      });
+    });
+
+    it("leaves the rest to the scene, as before", async () => {
+      const { connectBridgeOverHot } = await import("../src/bridgeClient.js");
+      const { hot, sent, emit } = fakeHot();
+      sceneWith(stamped(new THREE.Mesh(new THREE.BoxGeometry()), 7, "Rock"));
+
+      connectBridgeOverHot(hot, () => undefined);
+      emit("cts:bridge:query", { requestId: "q1", query: { kind: "list_scene_provenance" } });
+
+      expect(sent.at(-1)).toMatchObject({ data: { requestId: "q1", result: { status: "ready" } } });
+    });
+
+    it("waits for an answer that takes a frame to produce", async () => {
+      const { connectBridgeOverHot } = await import("../src/bridgeClient.js");
+      const { hot, sent, emit } = fakeHot();
+      let finish!: (value: unknown) => void;
+
+      connectBridgeOverHot(hot, () => new Promise((resolve) => (finish = resolve)));
+      emit("cts:bridge:query", { requestId: "q1", query: capture });
+      expect(sent.map((message) => message.event)).toEqual(["cts:bridge:hello"]);
+
+      finish({ status: "ready" });
+      await new Promise((resolve) => setTimeout(resolve));
+
+      expect(sent.at(-1)).toMatchObject({ data: { requestId: "q1", result: { status: "ready" } } });
+    });
+
+    // Silence would look like a hung page to the assistant, for the full timeout.
+    it("turns a failure into an answer", async () => {
+      const { connectBridgeOverHot } = await import("../src/bridgeClient.js");
+
+      for (const extend of [
+        () => {
+          throw new Error("no canvas");
+        },
+        () => Promise.reject(new Error("no canvas")),
+      ]) {
+        const { hot, sent, emit } = fakeHot();
+        connectBridgeOverHot(hot, extend);
+        emit("cts:bridge:query", { requestId: "q1", query: capture });
+        await new Promise((resolve) => setTimeout(resolve));
+
+        expect(sent.at(-1)).toMatchObject({
+          data: { requestId: "q1", result: { status: "error", message: "no canvas" } },
+        });
+      }
+    });
+  });
+
+  // A page on the old transport has no canvas capture or highlight of its own.
+  it("says a query needs the inspector, rather than failing strangely", async () => {
+    const { answerBridgeQuery } = await import("../src/bridgeClient.js");
+    sceneWith(stamped(new THREE.Mesh(new THREE.BoxGeometry()), 7, "Rock"));
+
+    expect(answerBridgeQuery({ kind: "capture_canvas" })).toMatchObject({
+      status: "unsupported",
+      reason: expect.stringContaining("needs the injected inspector"),
+    });
+  });
 });
