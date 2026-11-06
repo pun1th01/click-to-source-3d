@@ -41,7 +41,7 @@ CTS_E2E_CHANNEL=msedge npm run test:e2e
 | `packages/shared` | Types and protocol constants shared by both halves |
 | `packages/overlay` | Legacy React components |
 | `packages/examples` | A plain R3F scene with only the plugin added |
-| `e2e` | Playwright tests against the example |
+| `e2e` | Playwright tests against the example, with a real MCP server in `agent.spec.ts` |
 
 Design notes for earlier stages are in `docs/architecture/`.
 
