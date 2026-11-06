@@ -6,8 +6,12 @@ import {
   CallToolRequestSchema,
   ListToolsRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
+import { ActivityReporter, agentName } from "./activity.js";
 import {
+  getCanvasScreenshot,
   getInstanceProvenance,
+  getSelection,
+  highlightObject,
   listSceneProvenance,
   resolveAtPoint,
 } from "./bridge.js";
@@ -16,7 +20,7 @@ import {
   DevServerTimeoutError,
   DevServerUnreachableError,
 } from "./devServer.js";
-import { findDevServer } from "./discovery.js";
+import { findDevServer, versionMismatch } from "./discovery.js";
 import {
   editParameterTool,
   getSource,
@@ -45,7 +49,80 @@ function currentContext(): ToolContext {
   };
 }
 
+const INSTRUCTIONS =
+  "Click-to-Source connects you to the developer's running 3D scene. When they " +
+  'say "this", "these", "that mesh" or "the one I clicked", call get_selection ' +
+  "first: it returns the objects they are pointing at in the browser, each with " +
+  "its source location and editable values. To change a value, pass its file, " +
+  "line, column and raw text to edit_parameter, which Vite then hot-reloads. To " +
+  "see the scene, call get_canvas_screenshot. To show them which object you mean, " +
+  "call highlight_object.";
+
 const TOOLS = [
+  {
+    name: "get_selection",
+    description:
+      "What the developer is pointing at in the running scene. Call this whenever " +
+      'they refer to objects without naming them: "make this bigger", "why are ' +
+      'these so slow", "the one I clicked". `pointing` lists the objects they ' +
+      "deliberately pointed you at, in order; act on these first. `selected` is " +
+      "the object open in their inspector panel, and is what they mean if " +
+      "`pointing` is empty. Each object has its source file, component and line, " +
+      "its `props` with the exact line, column and raw text of every editable " +
+      "value, its transform and its rendering cost. A value with `via` is a " +
+      "constant, and its line and column are the constant's declaration, so " +
+      "changing it changes every use. Empty means they have not pointed at " +
+      "anything, so ask them to.",
+    inputSchema: { type: "object", properties: {} },
+  },
+  {
+    name: "highlight_object",
+    description:
+      "Outline objects on the developer's screen, in a colour of their own, to " +
+      'show them what you mean: "this is the tree I am changing". Names objects ' +
+      "by file and line, as get_selection and list_scene_provenance report them. " +
+      "Add `ordinal` for one of several objects from one line, and `instanceId` " +
+      "for one instance of an InstancedMesh. The outline lasts `seconds`, 15 by " +
+      "default. An empty list clears it. Reports what it found and what it did not.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        targets: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              file: { type: "string" },
+              line: { type: "number" },
+              ordinal: { type: "number" },
+              instanceId: { type: "number" },
+            },
+            required: ["file", "line"],
+          },
+        },
+        seconds: { type: "number", description: "How long the outline lasts, up to 120" },
+        pageId: { type: "number", description: "Required when several pages are open" },
+      },
+      required: ["targets"],
+    },
+  },
+  {
+    name: "get_canvas_screenshot",
+    description:
+      "A picture of the running scene, as the developer sees it, with any outlines " +
+      "but without the page around the canvas or the inspector panel. Use it to see " +
+      "what an object looks like, to find something to ask about with " +
+      "resolve_at_point, or to check a change after an edit. `via` is `frame` for a " +
+      "frame the app drew itself. It is `direct` when the tab is in the background " +
+      "and the scene was drawn just for this, without any post-processing.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        maxSize: { type: "number", description: "Longest edge in pixels. Default 1024, up to 2048." },
+        pageId: { type: "number", description: "Required when several pages are open" },
+      },
+    },
+  },
   {
     name: "get_source",
     description:
@@ -87,10 +164,13 @@ const TOOLS = [
   {
     name: "edit_parameter",
     description:
-      "Rewrite one argument at a source location, through the same AST editor " +
-      "the panel uses. Only the named literal changes; formatting is preserved. " +
-      "Fails with ARGUMENT_NOT_FOUND, LOCATION_NOT_FOUND or AMBIGUOUS_LOCATION " +
-      "rather than editing the wrong thing. Vite hot-reloads the result.",
+      "Rewrite one literal in source, through the same AST editor the panel uses. " +
+      "Only that literal changes; formatting is preserved, and the developer sees " +
+      "the edit in their activity log. Name it exactly, with the line, column and " +
+      "raw text from a value in get_selection or resolve_at_point's props. Or, for " +
+      "a hand-written sourceRef, by argName. Fails with STALE_LOCATION, " +
+      "ARGUMENT_NOT_FOUND, LOCATION_NOT_FOUND or AMBIGUOUS_LOCATION rather than " +
+      "editing the wrong thing. Vite hot-reloads the result.",
     inputSchema: {
       type: "object",
       properties: {
@@ -98,13 +178,21 @@ const TOOLS = [
         line: {
           type: "number",
           description:
-            "Line the argument is declared on. Use the declaredLine reported " +
-            "by list_provenance, which is often not the line the sourceRef sits on.",
+            "Line of the literal. By argName, use the declaredLine reported by " +
+            "list_provenance, which is often not the line the sourceRef sits on.",
         },
-        argName: { type: "string" },
+        column: {
+          type: "number",
+          description: "1-based column of the literal, from a value's `column`. Needs `expected`.",
+        },
+        expected: {
+          type: "string",
+          description: "The literal's current source text, from a value's `raw`.",
+        },
+        argName: { type: "string", description: "The argument's name, instead of column and expected." },
         newValue: { description: "String, number, boolean or null" },
       },
-      required: ["file", "line", "argName", "newValue"],
+      required: ["file", "line", "newValue"],
     },
   },
   {
@@ -143,7 +231,7 @@ const TOOLS = [
     description:
       "Resolve whatever is under a point in the RUNNING scene. Coordinates are " +
       "normalised device coordinates, -1 to 1. Needs the dev server running and " +
-      "the app open in a visible browser tab; nothing else to set up. The answer " +
+      "the app open in a browser tab; nothing else to set up. The answer " +
       "includes the object's editable props, each with its exact line and " +
       "column. Reports disconnected, no_scene, ambiguous or timeout rather than " +
       "failing silently — each has a different remedy.",
@@ -217,19 +305,41 @@ const { version } = createRequire(import.meta.url)("../package.json") as {
 
 const server = new Server(
   { name: "click-to-source", version },
-  { capabilities: { tools: {} } }
+  { capabilities: { tools: {} }, instructions: INSTRUCTIONS }
 );
+
+const reporter = new ActivityReporter(currentContext, () => ({
+  id: String(process.pid),
+  name: agentName(server.getClientVersion()?.name),
+}));
+
+server.oninitialized = () => reporter.start();
+
+// The assistant closing its end of the pipe is how an MCP server learns it has
+// gone. Without this the page would say it was connected for 15 seconds more.
+process.stdin.once("end", () => void reporter.leave());
 
 server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: TOOLS }));
 
 server.setRequestHandler(CallToolRequestSchema, async (request) => {
+  const tool = request.params.name;
   const args = (request.params.arguments ?? {}) as Record<string, never>;
   const context = currentContext();
+  const started = Date.now();
 
   try {
     let result: unknown;
 
-    switch (request.params.name) {
+    switch (tool) {
+      case "get_selection":
+        result = await getSelection(context);
+        break;
+      case "highlight_object":
+        result = await highlightObject(context, args as never);
+        break;
+      case "get_canvas_screenshot":
+        result = await getCanvasScreenshot(context, args as never);
+        break;
       case "get_source":
         result = await getSource(context, args as never);
         break;
@@ -273,7 +383,28 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         break;
       }
       default:
-        throw new Error(`Unknown tool: ${request.params.name}`);
+        throw new Error(`Unknown tool: ${tool}`);
+    }
+
+    reporter.call(tool, args, { result }, Date.now() - started);
+
+    const warning = process.env.CTS_DEV_SERVER
+      ? null
+      : versionMismatch(findDevServer(process.cwd())?.version, version);
+    if (warning) {
+      result = { ...(result as object), warning };
+    }
+
+    // A picture goes to the assistant as a picture, not as text it has to decode.
+    const image = (result as { result?: { status?: string; data?: string; mimeType?: string } }).result;
+    if (tool === "get_canvas_screenshot" && image?.status === "ready" && image.data && image.mimeType) {
+      const { data, ...about } = image;
+      return {
+        content: [
+          { type: "image", data, mimeType: image.mimeType },
+          { type: "text", text: JSON.stringify(about, null, 2) },
+        ],
+      };
     }
 
     return {
@@ -293,6 +424,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           : error instanceof Error
             ? error.message
             : "Unknown failure";
+
+    reporter.call(tool, args, { error: detail }, Date.now() - started);
 
     return {
       isError: true,

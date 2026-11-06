@@ -4,7 +4,7 @@ import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { DevServerEntry } from "@click-to-source-3d/shared";
-import { findDevServer } from "../src/discovery.js";
+import { findDevServer, versionMismatch } from "../src/discovery.js";
 
 /** A pid that certainly belongs to no running process: one that has exited. */
 const deadPid = (() => {
@@ -76,5 +76,24 @@ describe("findDevServer", () => {
     announce("good", {});
 
     expect(findDevServer(path.join(base, "app"), directory)?.origin).toBe("http://localhost:5173");
+  });
+});
+
+describe("versionMismatch", () => {
+  it("has nothing to say when the two match", () => {
+    expect(versionMismatch("0.1.6", "0.1.6")).toBeNull();
+  });
+
+  it("names both, and what to do", () => {
+    const warning = versionMismatch("0.1.5", "0.1.6")!;
+
+    expect(warning).toContain("plugin is version 0.1.5");
+    expect(warning).toContain("server is version 0.1.6");
+    expect(warning).toContain("update @click-to-source-3d/vite-plugin and @click-to-source-3d/mcp together");
+  });
+
+  // Nothing announced: no dev server, which has an error of its own.
+  it("says nothing when the plugin's version is not known", () => {
+    expect(versionMismatch(undefined, "0.1.6")).toBeNull();
   });
 });

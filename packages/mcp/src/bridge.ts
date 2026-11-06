@@ -1,6 +1,7 @@
 import {
   BRIDGE_QUERY_PATH,
   type BridgeQuery,
+  type ObjectRef,
   type ProvenanceAddress,
 } from "@click-to-source-3d/shared";
 import { postJson, type DevServerOptions } from "./devServer.js";
@@ -35,7 +36,7 @@ export type BridgeOutcome =
 async function ask(
   options: DevServerOptions,
   query: BridgeQuery,
-  extra: { pageId?: number } = {}
+  extra: { pageId?: number; timeoutMs?: number } = {}
 ): Promise<BridgeOutcome> {
   const payload = (await postJson(options, BRIDGE_QUERY_PATH, {
     query,
@@ -98,4 +99,39 @@ export function listSceneProvenance(
   input: { pageId?: number } = {}
 ): Promise<BridgeOutcome> {
   return ask(options, { kind: "list_scene_provenance" }, input);
+}
+
+/**
+ * What the developer is pointing at in the inspector, and what they have
+ * selected. Needs no pageId: their latest gesture says which page they mean.
+ */
+export function getSelection(options: DevServerOptions): Promise<BridgeOutcome> {
+  return ask(options, { kind: "get_selection" });
+}
+
+/** Outlines objects on the developer's screen. No targets clears the outline. */
+export function highlightObject(
+  options: DevServerOptions,
+  input: { targets?: ObjectRef[]; seconds?: number; pageId?: number }
+): Promise<BridgeOutcome> {
+  return ask(
+    options,
+    { kind: "highlight_objects", targets: input.targets ?? [], seconds: input.seconds },
+    { pageId: input.pageId }
+  );
+}
+
+/**
+ * A picture of the main canvas. Given longer than other questions, because in a
+ * background tab the page has to give up waiting for a frame and draw one.
+ */
+export function getCanvasScreenshot(
+  options: DevServerOptions,
+  input: { maxSize?: number; pageId?: number }
+): Promise<BridgeOutcome> {
+  return ask(
+    options,
+    { kind: "capture_canvas", maxSize: input.maxSize },
+    { pageId: input.pageId, timeoutMs: 8000 }
+  );
 }

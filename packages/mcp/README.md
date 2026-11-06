@@ -16,8 +16,8 @@ through it, to your app open in the browser.
 ## Scope
 
 **React Three Fiber, behind a Vite dev server** running
-[`@click-to-source-3d/vite-plugin`](https://www.npmjs.com/package/@click-to-source-3d/vite-plugin).
-The scene tools also need the app open in a visible browser tab.
+[`@click-to-source-3d/vite-plugin`](https://www.npmjs.com/package/@click-to-source-3d/vite-plugin)
+of the same version. The scene tools also need the app open in a browser tab.
 
 ## Install
 
@@ -50,14 +50,63 @@ on another port than usual. In a monorepo it picks the dev server whose
 project is closest to where the assistant was started. `CTS_DEV_SERVER` and
 `CTS_PROJECT_ROOT` still override it.
 
+## Pointing
+
+The developer points at one or more meshes in the browser, with the inspector's
+pointer button or Shift+click, then tells their assistant what to do: "make these
+bigger". The server's instructions tell the assistant to call `get_selection` when
+someone says "this" or "these". It returns each object in order:
+
+    {
+      "kind": "Mesh",
+      "source": { "file": "src/World.tsx", "function": "World", "line": 41, "column": 7 },
+      "props": [
+        {
+          "element": "boxGeometry",
+          "name": "args",
+          "array": true,
+          "values": [
+            { "raw": "1.5", "value": 1.5, "editable": true, "line": 4, "column": 20, "via": "ROCK_SIZE" }
+          ]
+        }
+      ],
+      "transform": { "position": [-2, 0.75, 0], "rotation": [0, 0, 0], "scale": [1, 1, 1], "worldPosition": [-2, 0.75, 0] },
+      "materials": ["MeshStandardMaterial #c2643c"],
+      "cost": { "triangles": 12, "drawCalls": 1, "geometryBytes": 840, "textures": [] }
+    }
+
+A value's `line`, `column` and `raw` are what `edit_parameter` takes to rewrite it.
+A `via` means the value is a constant and the position is its declaration, so the
+edit changes every use.
+
+The answer comes from the dev server, which the page tells as things change, so it
+works with the tab in the background and during the reload an edit can cause.
+
+## What the developer sees
+
+The inspector's Agent tab shows which assistant is connected and every call it
+makes, in plain words, with edits marked. Objects it asks about are outlined for a
+moment, in a colour of their own. Clicking a line selects that object, or opens
+that line in their editor.
+
+The server reports each call to the dev server to make that happen, along with a
+heartbeat. Nothing leaves the machine, and a report that fails never affects the
+call.
+
 ## Tools
+
+The developer and their screen — these need the app open:
+
+    get_selection            what they are pointing at, and have selected
+    highlight_object         outline objects to show them what you mean
+    get_canvas_screenshot    see the scene as they do
 
 Reading source — these work without a browser:
 
     get_source            read a file, or a line range
     list_provenance       every declared provenance site, by static scan
     search_by_generator   find sites by function or argument name
-    edit_parameter        rewrite one argument's literal, via the AST editor
+    edit_parameter        rewrite one literal, by exact position or by name
 
 Reading the running scene — these need the app open:
 
@@ -73,6 +122,14 @@ material, with counts chosen by a seeded RNG. None of that is in the source, and
 no scan can find it.
 
 ## What it will not do
+
+**Only edits through `edit_parameter` are in the log.** An assistant can also edit
+files with its own tools, as with any file. Those still hot-reload, but this server
+never sees them.
+
+**A screenshot is of the canvas.** Not the page around it, and not the inspector's
+panel. From a background tab it is drawn just for the call, without any
+post-processing the app does, and `via` says `direct`.
 
 **Instanced provenance is read-only.** An instance's transform comes from a
 seeded RNG, so no literal in source corresponds to it and there is nothing for

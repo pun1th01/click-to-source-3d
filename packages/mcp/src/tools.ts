@@ -198,10 +198,16 @@ export async function getSource(
  * path, which is list_provenance: a static scan produces coordinates that
  * were never resolved through a click.
  */
-export async function editParameterTool(
-  context: ToolContext,
-  input: { file: string; line: number; argName: string; newValue: unknown }
-): Promise<{ file: string; line: number; argName: string; newValue: unknown }> {
+export async function editParameterTool<
+  Edit extends {
+    file: string;
+    line: number;
+    argName?: string;
+    column?: number;
+    expected?: string;
+    newValue: unknown;
+  },
+>(context: ToolContext, input: Edit): Promise<Edit> {
   await editParameter(context, input);
 
   return input;

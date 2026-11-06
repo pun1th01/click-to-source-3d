@@ -165,10 +165,20 @@ export async function readSourceFile(
  * it is absent, so the edit applies to what is on disk right now rather than
  * to whatever the caller last read — which for an agent may be many turns
  * stale.
+ *
+ * Names the literal by its argument name, or by `column` and `expected`, its
+ * exact position and current text, which is what `get_selection` reports.
  */
 export async function editParameter(
   options: DevServerOptions,
-  edit: { file: string; line: number; argName: string; newValue: unknown }
+  edit: {
+    file: string;
+    line: number;
+    argName?: string;
+    column?: number;
+    expected?: string;
+    newValue: unknown;
+  }
 ): Promise<void> {
   await postJson(options, WRITE_FILE_PATH, edit);
 }

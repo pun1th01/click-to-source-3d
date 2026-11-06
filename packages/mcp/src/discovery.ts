@@ -79,3 +79,22 @@ export function findDevServer(
   live.sort((a, b) => rank(a) - rank(b) || b.startedAt - a.startedAt);
   return live[0] ?? null;
 }
+
+/**
+ * A warning when this server and the plugin are not the same version.
+ *
+ * The two share a protocol and are released together, but they are installed
+ * separately, so updating one is easy. The symptoms otherwise are strange: an
+ * older plugin answers a new tool with an error about undefined, and an older
+ * server is simply not shown as connected.
+ */
+export function versionMismatch(plugin: string | undefined, server: string): string | null {
+  if (!plugin || plugin === server) {
+    return null;
+  }
+  return (
+    `The Vite plugin is version ${plugin} and this MCP server is version ${server}. ` +
+    "They need to match, or some tools will not work. Ask the developer to update " +
+    "@click-to-source-3d/vite-plugin and @click-to-source-3d/mcp together."
+  );
+}
