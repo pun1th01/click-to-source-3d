@@ -2,6 +2,110 @@
 
 All packages are versioned in lockstep.
 
+## 0.1.6
+
+Point at what you mean, and watch your assistant work. Mark one or more meshes in
+the browser, go to your assistant and type "make these bigger". It sees exactly
+which objects you mean, with the file, line and every editable value of each, and
+everything it does shows up in the inspector as it happens.
+
+### Upgrading
+
+Update `@click-to-source-3d/vite-plugin`, and `@click-to-source-3d/mcp` if you use
+it. They need to be on the same version. Nothing else changes.
+
+### Added
+
+**Pointing an assistant at objects.** The pointer button beside the inspect button,
+which appears while an assistant is connected, turns on a mode where each click
+marks an object. Shift+click does the same in inspect mode, and **Point** in the
+panel marks the selection. Marked objects are outlined in amber, listed in order in
+the Agent tab, and kept through a reload. One instance of an `InstancedMesh` can be
+marked on its own. An assistant reads them with `get_selection`, and the server's
+instructions tell it to do that when someone says "this" or "these".
+
+**The Agent tab**, next to Inspect: which assistant is connected and when it last
+made a call, and every tool call in plain words with its result, edits marked and
+failures in red. Objects it asks about are outlined in violet for a moment. A line
+of the log leads to its object, or to its source if the scene doesn't have it. The
+log outlives a reload and is there for a page opened later.
+
+**New MCP tools.**
+- `get_selection`: what the developer is pointing at and has selected, each object
+  with its source, every editable value with its exact position, its transform,
+  materials and cost. Answered by the dev server from what the page last told it,
+  so it works with the tab in the background and during a reload, and needs no
+  `pageId`: the developer's latest gesture says which page they mean.
+- `highlight_object`: outlines objects on the developer's screen, by file and line,
+  for as long as the assistant asks.
+- `get_canvas_screenshot`: a picture of the canvas, returned as an image, with any
+  outlines. A WebGL canvas can only be read right after it is drawn, so this waits
+  for the app's next frame. In a background tab, where none comes, it draws the
+  scene once itself, and `via` says so.
+
+`edit_parameter` also takes `column` and `expected`, the exact position
+`get_selection` reports, so a value in an array like `position={[0, 1, 2]}` can now
+be edited through it, and the edit appears in the log. It is refused with
+`STALE_LOCATION` if the text there has changed.
+
+**Live previews.** Every numeric value the scene can show gets a slider. Dragging it
+or typing a number changes the live object straight away, with nothing written, and
+a bar counts what is unsaved. Enter or **Save** writes it all, last in the file
+first, so that a literal changing length cannot make the next position stale.
+**Revert**, Esc or selecting something else puts the scene back. A geometry's `args`
+preview by rebuilding it from its `parameters`, and R3F's own takes over after a
+save. Every field showing one constant moves together, since saving any of them
+changes them all.
+
+**Performance section.** Triangles, draw calls, vertices, geometry memory, each
+texture's size and estimated memory, whether it casts shadows, and its share of the
+frame. `measureObject` in `@click-to-source-3d/core/devtools`.
+
+**Pin and compare.** **Pin** an object, select another or pin two, and the Compare
+tab shows them row by row with differences marked and an option to show only those.
+Pins survive a reload.
+
+**Copy as a bug report.** **Report** copies source, transform, values, cost and
+environment as Markdown. Markdown text cannot hold a picture, so the screenshot
+travels as the rich version of the same copy: a doc or chat gets it, and an issue
+form gets the Markdown. **Image** copies just the screenshot.
+
+### Changed
+
+- The MCP server warns when it and the plugin are on different versions. They are
+  installed separately, and the symptoms are otherwise strange.
+
+### Fixed
+
+- **The renderer's frame counters were wrong while anything was highlighted.** The
+  highlight is drawn with a render call of its own, which reset `renderer.info`, so
+  an FPS panel or r3f-perf reported the highlight's two boxes instead of your scene.
+  They now keep describing your frame.
+
+### Found by testing it
+
+- An edit to an entry module could lose objects from the pointer list. The update
+  unmounts everything before it remounts, and a refresh landing in that gap dropped
+  whatever it couldn't find, then saved that. Objects now count as gone only after
+  the last of three looks.
+- Restoring after a reload gave up after 8 seconds even with no canvas yet, then
+  saved an empty list over what it was looking for. Stopping a dev server mid-load
+  did it. The clock now starts when there is a canvas.
+- A reloaded list could come back in another order if objects mounted out of order.
+- Any hot update, a stylesheet's included, redrew the panel and threw away a value
+  being dragged. It now redraws only if that object's own source changed.
+- An assistant's last report could arrive after its goodbye and bring it back as
+  connected for 15 seconds.
+- A tab that had just closed kept what it pointed at for a different page to inherit.
+- A passing question from the assistant cut short an outline it had asked to keep.
+
+### Repository
+
+- `e2e/agent.spec.ts` drives the whole loop with a real MCP server: pointing, reading
+  it back, editing through what came back, surviving the reload, the log, outlines,
+  screenshots read back and checked for content, sliders, compare and the clipboard.
+- New README screenshots, taken by the same script as the others.
+
 ## 0.1.5
 
 One command, and nothing in your app. Until now, using Click-to-Source meant
