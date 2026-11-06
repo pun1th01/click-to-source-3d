@@ -132,11 +132,17 @@ test("an assistant's MCP server answers about the open page with no configuratio
   );
 
   try {
-    const result = await client.callTool({ name: "list_scene_provenance", arguments: {} });
-    const text = (result.content as Array<{ type: string; text: string }>)[0].text;
-    const answer = JSON.parse(text) as { status: string; result: { status: string; objects: unknown[] } };
+    const ask = async () => {
+      const result = await client.callTool({ name: "list_scene_provenance", arguments: {} });
+      const text = (result.content as Array<{ type: string; text: string }>)[0].text;
+      return JSON.parse(text) as { status: string; result: { status: string; objects: unknown[] } };
+    };
 
-    expect(answer.status).toBe("answered");
+    // A file restored by an earlier test can reload the page late, and a page
+    // mid-reload truthfully answers "disconnected" for a moment.
+    await expect.poll(async () => (await ask()).status, { timeout: 20_000 }).toBe("answered");
+
+    const answer = await ask();
     expect(answer.result.status).toBe("ready");
     expect(answer.result.objects.length).toBeGreaterThan(3);
   } finally {
