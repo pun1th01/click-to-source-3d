@@ -1,14 +1,35 @@
 {
   "name": "@click-to-source-3d/mcp",
   "version": "0.1.6",
-  "description": "MCP server exposing Click-to-Source 3D provenance to coding agents",
+  "description": "MCP server that lets AI coding assistants like Claude Code see a running React Three Fiber (three.js) scene, read the meshes you point at, and edit their values in source.",
+  "keywords": [
+    "threejs",
+    "three.js",
+    "react-three-fiber",
+    "r3f",
+    "webgl",
+    "3d",
+    "mcp",
+    "mcp-server",
+    "model-context-protocol",
+    "claude",
+    "claude-code",
+    "ai-tools",
+    "cursor",
+    "devtools",
+    "click-to-source"
+  ],
   "license": "MIT",
+  "author": "Punith P (https://github.com/pun1th01)",
   "repository": {
     "type": "git",
-    "url": "https://github.com/pun1th01/click-to-source-3d.git",
+    "url": "git+https://github.com/pun1th01/click-to-source-3d.git",
     "directory": "packages/mcp"
   },
   "homepage": "https://github.com/pun1th01/click-to-source-3d#readme",
+  "bugs": {
+    "url": "https://github.com/pun1th01/click-to-source-3d/issues"
+  },
   "type": "module",
   "exports": {
     ".": {

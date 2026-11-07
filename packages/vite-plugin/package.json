@@ -1,15 +1,35 @@
 {
   "name": "@click-to-source-3d/vite-plugin",
   "version": "0.1.6",
-  "description": "Inspect any object in a React Three Fiber scene: see the line that created it and edit its values. Vite plugin for Click-to-Source 3D.",
+  "description": "Click any mesh in a React Three Fiber (three.js) scene to see the line of code that created it and edit its values live. A Vite plugin with nothing to add to your code.",
+  "keywords": [
+    "threejs",
+    "three.js",
+    "react-three-fiber",
+    "r3f",
+    "webgl",
+    "3d",
+    "vite",
+    "vite-plugin",
+    "devtools",
+    "inspector",
+    "debugging",
+    "developer-tools",
+    "click-to-source",
+    "hot-reload",
+    "mcp"
+  ],
   "license": "MIT",
-  "keywords": ["threejs", "react-three-fiber", "r3f", "vite", "vite-plugin", "devtools", "inspector"],
+  "author": "Punith P (https://github.com/pun1th01)",
   "repository": {
     "type": "git",
-    "url": "https://github.com/pun1th01/click-to-source-3d.git",
+    "url": "git+https://github.com/pun1th01/click-to-source-3d.git",
     "directory": "packages/vite-plugin"
   },
   "homepage": "https://github.com/pun1th01/click-to-source-3d#readme",
+  "bugs": {
+    "url": "https://github.com/pun1th01/click-to-source-3d/issues"
+  },
   "type": "module",
   "exports": {
     ".": {

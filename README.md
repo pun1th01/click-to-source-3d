@@ -1,14 +1,23 @@
 # Click-to-Source 3D
 
+[![npm version](https://img.shields.io/npm/v/@click-to-source-3d/vite-plugin?color=3cc2b8&label=npm)](https://www.npmjs.com/package/@click-to-source-3d/vite-plugin)
+[![npm downloads](https://img.shields.io/npm/dm/@click-to-source-3d/vite-plugin?color=3cc2b8)](https://www.npmjs.com/package/@click-to-source-3d/vite-plugin)
 [![CI](https://github.com/pun1th01/click-to-source-3d/actions/workflows/ci.yml/badge.svg)](https://github.com/pun1th01/click-to-source-3d/actions/workflows/ci.yml)
+[![MIT license](https://img.shields.io/github/license/pun1th01/click-to-source-3d?color=3cc2b8)](LICENSE)
 
-**Click any object in your React Three Fiber scene to see the line of code that
-created it, and change its values right there.**
+**Click any mesh in your React Three Fiber (three.js) scene to see the line of
+code that created it, and change its values right there.**
 
-It works like DevTools' "Inspect Element", but for 3D. There is nothing to add
-to your code: no imports, no components, no tags.
+It works like DevTools' "Inspect Element", but for 3D. It's a Vite plugin that
+takes one command to set up, with nothing to add to your code: no imports, no
+components, no tags. It also connects to AI coding assistants like Claude Code,
+so you can point at a mesh and tell them what to change.
 
-![The inspector panel for a box, showing the line it came from and its values as editable fields](docs/assets/inspector-panel.png)
+```bash
+npx click-to-source-3d init
+```
+
+![The Click-to-Source 3D inspector panel for a mesh in a React Three Fiber scene, showing the line of code it came from and its values as editable fields](docs/assets/inspector-panel.png)
 
 **On this page**
 
@@ -548,9 +557,12 @@ click-to-source/
 
 ## Contributing
 
-Contributions are welcome! Please read the [Contributing Guidelines](CONTRIBUTING.md).
-Participants are expected to follow the [Contributor Covenant](https://www.contributor-covenant.org/version/2/1/code_of_conduct/).
-If you are opening an issue, please use the provided [Issue Templates](.github/ISSUE_TEMPLATE/).
+Contributions are welcome! Please read the [Contributing Guidelines](CONTRIBUTING.md)
+and our [Code of Conduct](CODE_OF_CONDUCT.md).
+
+- **Questions and ideas:** [Discussions](https://github.com/pun1th01/click-to-source-3d/discussions), or see [getting help](SUPPORT.md)
+- **Bugs and feature requests:** [open an issue](https://github.com/pun1th01/click-to-source-3d/issues/new/choose)
+- **Security problems:** please report them privately, as the [security policy](SECURITY.md) explains
 
 ## License
 

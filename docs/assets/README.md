@@ -12,3 +12,6 @@ Those are `inspector-panel`, `-hover`, `-instance`, `-preview`, `-compare` and
 
 The `panel-*.png` images show the panel from before 0.1.5, when it was a set
 of React components wired in by hand.
+
+`social-preview.png` is what a link to the repository shows on social media. GitHub
+has no API for it: upload it under **Settings → General → Social preview**.

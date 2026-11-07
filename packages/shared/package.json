@@ -1,14 +1,23 @@
 {
   "name": "@click-to-source-3d/shared",
   "version": "0.1.6",
-  "description": "Shared utilities and types for Click-to-Source 3D",
+  "description": "Types and protocol constants shared by the Click-to-Source 3D packages. Internal.",
+  "keywords": [
+    "click-to-source",
+    "threejs",
+    "react-three-fiber"
+  ],
   "license": "MIT",
+  "author": "Punith P (https://github.com/pun1th01)",
   "repository": {
     "type": "git",
-    "url": "https://github.com/pun1th01/click-to-source-3d.git",
+    "url": "git+https://github.com/pun1th01/click-to-source-3d.git",
     "directory": "packages/shared"
   },
   "homepage": "https://github.com/pun1th01/click-to-source-3d#readme",
+  "bugs": {
+    "url": "https://github.com/pun1th01/click-to-source-3d/issues"
+  },
   "type": "module",
   "exports": {
     ".": {

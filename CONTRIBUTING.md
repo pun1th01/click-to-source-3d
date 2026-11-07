@@ -1,7 +1,8 @@
 # Contributing
 
 Thanks for helping. Bug reports, fixes and documentation corrections are all
-welcome.
+welcome. Everyone taking part is expected to follow the
+[Code of Conduct](CODE_OF_CONDUCT.md).
 
 ## Setup
 
@@ -66,5 +67,6 @@ under npm and pnpm, run `init`, and check the console.
   writes files, or answers questions about the scene, goes through
   `checkCaller` in `packages/vite-plugin/src/middleware.ts`.
 
-If you're opening an issue, the templates in `.github/ISSUE_TEMPLATE/` ask
-for what we need to reproduce it.
+If you're opening an issue, the forms ask for what we need to reproduce it.
+Questions go in [Discussions](https://github.com/pun1th01/click-to-source-3d/discussions),
+and security problems go through the [security policy](SECURITY.md).

@@ -1,14 +1,31 @@
 {
   "name": "@click-to-source-3d/core",
   "version": "0.1.6",
-  "description": "Core provenance engine for Click-to-Source 3D",
+  "description": "Find the source code behind any three.js object: resolving, picking, highlighting and measuring for building inspectors. Part of Click-to-Source 3D.",
+  "keywords": [
+    "threejs",
+    "three.js",
+    "react-three-fiber",
+    "r3f",
+    "webgl",
+    "3d",
+    "devtools",
+    "inspector",
+    "raycasting",
+    "provenance",
+    "click-to-source"
+  ],
   "license": "MIT",
+  "author": "Punith P (https://github.com/pun1th01)",
   "repository": {
     "type": "git",
-    "url": "https://github.com/pun1th01/click-to-source-3d.git",
+    "url": "git+https://github.com/pun1th01/click-to-source-3d.git",
     "directory": "packages/core"
   },
   "homepage": "https://github.com/pun1th01/click-to-source-3d#readme",
+  "bugs": {
+    "url": "https://github.com/pun1th01/click-to-source-3d/issues"
+  },
   "type": "module",
   "exports": {
     ".": {

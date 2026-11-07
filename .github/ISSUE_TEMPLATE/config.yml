@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Question or idea
+    url: https://github.com/pun1th01/click-to-source-3d/discussions
+    about: Ask how something works, or talk through an idea, in Discussions.
+  - name: Security problem
+    url: https://github.com/pun1th01/click-to-source-3d/security/advisories/new
+    about: Please report these privately rather than opening a public issue.

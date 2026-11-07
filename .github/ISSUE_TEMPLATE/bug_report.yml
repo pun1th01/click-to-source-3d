@@ -1,0 +1,71 @@
+name: Bug report
+description: Something doesn't work the way the docs say it should
+title: "[Bug] "
+labels: ["bug"]
+body:
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: What did you do, and what happened instead of what you expected?
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: A small project or the JSX involved helps most.
+      placeholder: |
+        1. Run `npx click-to-source-3d init`
+        2. Press Alt+Shift+C and click the mesh
+        3. ...
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Which part is it?
+      options:
+        - Setup (`npx click-to-source-3d init`)
+        - Inspector (selecting, the panel, Open)
+        - Editing values or sliders
+        - Performance, Compare or Report
+        - AI assistant (MCP tools, pointing, Agent tab)
+        - Something else
+    validations:
+      required: true
+  - type: input
+    id: plugin-version
+    attributes:
+      label: Click-to-Source version
+      description: Run `npm ls @click-to-source-3d/vite-plugin`.
+      placeholder: "0.1.6"
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: The versions you're on. Add your assistant if the bug involves one.
+      value: |
+        - OS:
+        - Browser:
+        - Node.js:
+        - Vite:
+        - React Three Fiber:
+        - three.js:
+        - Package manager:
+        - AI assistant:
+    validations:
+      required: true
+  - type: textarea
+    id: console
+    attributes:
+      label: Console or terminal output
+      description: Anything from the browser console or the dev server. Formatted as code automatically.
+      render: text
+  - type: textarea
+    id: screenshots
+    attributes:
+      label: Screenshots or recordings
+      description: The inspector's **Report** button copies most of what's useful about an object.
