@@ -136,12 +136,23 @@ describe("copying", () => {
   it("falls back to text when rich copies are refused", async () => {
     vi.stubGlobal("ClipboardItem", FakeClipboardItem);
     const writeText = vi.fn(async () => undefined);
-    useClipboard({ write: vi.fn(async () => Promise.reject(new Error("refused"))), writeText });
+    let rich: Blob | Promise<Blob> | undefined;
+    const write = vi.fn(async ([item]: FakeClipboardItem[]) => {
+      rich = item.items["text/html"];
+      throw new Error("refused");
+    });
+    useClipboard({ write, writeText });
 
     const { picture } = await copyReport("the report", image());
 
     expect(picture).toBe(false);
     expect(writeText).toHaveBeenCalledWith("the report");
+
+    // The picture is still being read when the write is refused. Left running,
+    // that read can finish after jsdom has shut down and swapped the global
+    // Uint8Array back, which throws and fails the whole run after every test
+    // has passed. Seen once on CI; forced by keeping reads going past shutdown.
+    await rich;
   });
 
   // navigator.clipboard is only there in a secure context, and `vite --host`
