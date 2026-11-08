@@ -1,6 +1,6 @@
 {
   "name": "@click-to-source-3d/core",
-  "version": "0.1.6",
+  "version": "0.2.0",
   "description": "Find the source code behind any three.js object: resolving, picking, highlighting and measuring for building inspectors. Part of Click-to-Source 3D.",
   "keywords": [
     "threejs",
@@ -59,7 +59,7 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@click-to-source-3d/shared": "0.1.6"
+    "@click-to-source-3d/shared": "0.2.0"
   },
   "peerDependencies": {
     "three": ">=0.150.0"

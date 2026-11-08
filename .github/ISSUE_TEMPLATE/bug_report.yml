@@ -39,7 +39,7 @@ body:
     attributes:
       label: Click-to-Source version
       description: Run `npm ls @click-to-source-3d/vite-plugin`.
-      placeholder: "0.1.6"
+      placeholder: "0.2.0"
     validations:
       required: true
   - type: textarea

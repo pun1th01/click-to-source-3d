@@ -2,7 +2,7 @@
 
 All packages are versioned in lockstep.
 
-## 0.2.0 — unreleased
+## 0.2.0
 
 The plugin now works with plain three.js, with nothing tagged by hand, and setting it up is one
 command with nothing to do afterwards. This is the first version to support both three.js and

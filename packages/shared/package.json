@@ -1,6 +1,6 @@
 {
   "name": "@click-to-source-3d/shared",
-  "version": "0.1.6",
+  "version": "0.2.0",
   "description": "Types and protocol constants shared by the Click-to-Source 3D packages. Internal.",
   "keywords": [
     "click-to-source",
