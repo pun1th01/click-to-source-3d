@@ -14,6 +14,7 @@ export { measureObject } from "./meshStats.js";
 export {
   editSourceFile,
   editSourceAt,
+  editSourceMany,
   readSourceFile,
   SourceEditTransportError,
 } from "./sourceEditClient.js";
@@ -27,3 +28,21 @@ export type { Pick } from "./picking.js";
 
 export { connectBridgeOverHot, setBridgeScene } from "./bridgeClient.js";
 export type { BridgeExtension, HotChannel } from "./bridgeClient.js";
+
+export {
+  allPropsOf,
+  ctsCall,
+  ctsEnter,
+  ctsLeave,
+  ctsLoadAsync,
+  ctsNew,
+  ctsOnLoad,
+  ctsSite,
+  ctsVia,
+  describeValue,
+  generatorsOf,
+  partsOf,
+  recordOf,
+  stampOf,
+} from "./trace.js";
+export type { CallSite, ObjectPart } from "./trace.js";

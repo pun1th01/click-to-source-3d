@@ -1,10 +1,6 @@
 import { describe, expect, it } from "vitest";
 import * as THREE from "three";
-import {
-  installInstanceProbe,
-  getInstanceRecord,
-  getProbeStats,
-} from "../src/instanceCapture.js";
+import { getInstanceRecord } from "../src/instanceCapture.js";
 import { resolveSourceRef } from "../src/resolver.js";
 
 type Transform = { x: number; y: number; z: number; scale: number; yaw: number };
@@ -156,20 +152,6 @@ describe("instance transforms, read live", () => {
 
     expect(getInstanceRecord(first, 0)?.position[0]).toBe(10);
     expect(getInstanceRecord(second, 0)?.position[0]).toBe(20);
-  });
-});
-
-describe("the deprecated probe entry points", () => {
-  it("install patches nothing", () => {
-    const setMatrixAt = THREE.InstancedMesh.prototype.setMatrixAt;
-    const clone = THREE.Matrix4.prototype.clone;
-
-    installInstanceProbe();
-    installInstanceProbe();
-
-    expect(THREE.InstancedMesh.prototype.setMatrixAt).toBe(setMatrixAt);
-    expect(THREE.Matrix4.prototype.clone).toBe(clone);
-    expect(getProbeStats().installed).toBe(true);
   });
 });
 

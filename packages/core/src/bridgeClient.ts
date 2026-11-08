@@ -1,16 +1,15 @@
 import * as THREE from "three";
 import {
-  BRIDGE_EVENTS_PATH,
   BRIDGE_HELLO_EVENT,
   BRIDGE_QUERY_EVENT,
   BRIDGE_REPLY_EVENT,
-  BRIDGE_REPLY_PATH,
   type BridgeQuery,
   type ProvenanceAddress,
   type SourceStamp,
 } from "@click-to-source-3d/shared";
 import { getInstanceRecord } from "./instanceCapture.js";
 import { resolveSourceRef } from "./resolver.js";
+import { allPropsOf, generatorsOf, recordOf, stampOf as recordedStampOf } from "./trace.js";
 
 /**
  * Browser half of the bridge. Answers questions about the live scene that
@@ -24,7 +23,6 @@ import { resolveSourceRef } from "./resolver.js";
 type SceneHandle = { scene: THREE.Object3D; camera: THREE.Camera };
 
 let handle: SceneHandle | null = null;
-let source: EventSource | null = null;
 
 /**
  * Incremented whenever a scene is attached.
@@ -60,7 +58,7 @@ export function getBridgeGeneration(): number {
 }
 
 function stampOf(object: THREE.Object3D): SourceStamp | null {
-  const stamp = object.userData?.__ctsSource as SourceStamp | undefined;
+  const stamp = recordedStampOf(object);
 
   if (stamp?.file && stamp.function && stamp.line !== undefined) {
     return stamp;
@@ -139,9 +137,28 @@ function describe(object: THREE.Object3D, ordinal: number) {
   const stamp = stampOf(object);
 
   return {
-    address: stamp ? { ...stamp, ordinal } : null,
+    address: stamp
+      ? {
+          file: stamp.file,
+          function: stamp.function,
+          line: stamp.line,
+          ...(stamp.column !== undefined ? { column: stamp.column } : {}),
+          ordinal,
+        }
+      : null,
     kind: instanced.isInstancedMesh ? "InstancedMesh" : object.type,
+    name: object.name || null,
     count: instanced.isInstancedMesh ? instanced.count : null,
+  };
+}
+
+/** Everything known about one object, for a question about that object. */
+function detailsOf(object: THREE.Object3D) {
+  const record = recordOf(object);
+  return {
+    props: allPropsOf(object),
+    trace: record?.trace ?? [],
+    generators: generatorsOf(object),
   };
 }
 
@@ -186,10 +203,19 @@ export function answerBridgeQuery(query: BridgeQuery): unknown {
       return {
         status: "ready",
         generation,
+        kind: (hit.object as THREE.InstancedMesh).isInstancedMesh ? "InstancedMesh" : hit.object.type,
         address: entry
-          ? { ...entry.stamp, ordinal: entry.ordinal, instanceId: hit.instanceId }
+          ? {
+              file: entry.stamp.file,
+              function: entry.stamp.function,
+              line: entry.stamp.line,
+              ...(entry.stamp.column !== undefined ? { column: entry.stamp.column } : {}),
+              ordinal: entry.ordinal,
+              instanceId: hit.instanceId,
+            }
           : null,
         sourceRef: resolved.sourceRef,
+        ...detailsOf(resolved.object),
         readonly: resolved.readonly ?? false,
         instanceId: resolved.instanceId ?? null,
         distance: hit.distance,
@@ -201,12 +227,12 @@ export function answerBridgeQuery(query: BridgeQuery): unknown {
 
   if (query.kind !== "get_instance_provenance") {
     // Asks for something only the injected inspector can do, of a page that
-    // reached the bridge another way: <ClickToSourceBridge />, which has no
-    // canvas to photograph and no highlight of its own to draw with.
+    // answers through a transport of its own, which has no canvas to photograph
+    // and no highlight to draw with.
     return {
       status: "unsupported",
       generation,
-      reason: `${query.kind} needs the injected inspector. Remove <ClickToSourceBridge /> from the page.`,
+      reason: `${query.kind} needs the injected inspector, and this page connected some other way.`,
     };
   }
 
@@ -233,6 +259,7 @@ export function answerBridgeQuery(query: BridgeQuery): unknown {
       status: "ready",
       generation,
       sourceRef: resolved?.sourceRef ?? null,
+      ...detailsOf(entry.object),
       readonly: resolved?.readonly ?? false,
     };
   }
@@ -265,13 +292,8 @@ export function answerBridgeQuery(query: BridgeQuery): unknown {
 }
 
 /**
- * Stable for the lifetime of this document, so the hub can recognise two
- * sockets from one page as one page.
- *
- * StrictMode mounts an effect twice in development, and a browser does not
- * always surface the first EventSource's close to the server before the
- * second opens. Keyed by socket, the hub then sees two pages and refuses to
- * answer as ambiguous — which was the observed behaviour before this existed.
+ * Stable for the lifetime of this tab, so the hub can recognise a reloaded page
+ * as the same page, and keep what it had pointed at through the reload.
  */
 function sessionId(): string {
   const KEY = "__cts_bridge_session";
@@ -385,63 +407,5 @@ export function connectBridgeOverHot(hot: HotChannel, extend?: BridgeExtension):
   return () => {
     hot.off?.(BRIDGE_QUERY_EVENT, onQuery as (data: never) => void);
     hot.off?.("vite:ws:connect", hello as (data: never) => void);
-  };
-}
-
-/**
- * Opens the event channel and answers queries until the page goes away.
- *
- * The transport of `<ClickToSourceBridge />`. The injected inspector uses
- * `connectBridgeOverHot` instead; this one goes in 0.2.0.
- */
-export function connectBridge(): () => void {
-  if (typeof EventSource === "undefined") {
-    return () => undefined;
-  }
-
-  // A second call replaces the first rather than being ignored, so a remount
-  // cannot leave a stream nobody is reading.
-  source?.close();
-
-  source = new EventSource(
-    `${BRIDGE_EVENTS_PATH}?session=${encodeURIComponent(sessionId())}`
-  );
-
-  source.onmessage = (event) => {
-    let answer: ReturnType<typeof reply>;
-
-    try {
-      answer = reply(JSON.parse(event.data));
-    } catch {
-      return;
-    }
-
-    if (!answer) {
-      return;
-    }
-
-    // Deliberately not awaited, and deliberately swallowed. The hub applies
-    // its own deadline to every question it asks, so a reply that never
-    // arrives is already handled on that side. What the catch prevents is a
-    // dev server stopped while a tab is still open turning each in-flight
-    // reply into an unhandled rejection in the developer's console.
-    void fetch(BRIDGE_REPLY_PATH, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(answer),
-    }).catch(() => undefined);
-  };
-
-  const opened = source;
-
-  return () => {
-    // Close only the stream this call opened. A later connect may already
-    // have replaced it, and closing that one would silently disconnect the
-    // live bridge.
-    opened.close();
-
-    if (source === opened) {
-      source = null;
-    }
   };
 }

@@ -3,16 +3,11 @@ import * as THREE from "three";
 import { answerBridgeQuery, setBridgeScene } from "../src/bridgeClient.js";
 
 /**
- * Its own file on purpose: Vitest isolates modules per file, so nothing here
- * has imported the deprecated probe entry or called installInstanceProbe.
- *
- * Instance provenance used to depend on a probe installed before the first
- * scene mounted, and without one this query could only explain why it had no
- * answer. Transforms are now read live, so the uninstalled case must answer
- * like any other.
+ * Instance provenance needs nothing installed before the first scene mounts:
+ * transforms are read live from the mesh when asked for.
  */
 
-describe("answerBridgeQuery with no probe ever installed", () => {
+describe("answerBridgeQuery for an instance", () => {
   it("still resolves an instance", () => {
     const mesh = new THREE.InstancedMesh(
       new THREE.ConeGeometry(1, 2, 6),

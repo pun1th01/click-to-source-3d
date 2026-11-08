@@ -1,13 +1,10 @@
 import * as THREE from "three";
-import {
-  SourceRef,
-  InstanceSourceRef,
-  SourceStamp,
-} from "@click-to-source-3d/shared";
+import { SourceRef, InstanceSourceRef } from "@click-to-source-3d/shared";
 import {
   getInstanceRecord,
   instanceSourceRefFrom,
 } from "./instanceCapture.js";
+import { stampOf } from "./trace.js";
 
 /**
  * The core resolution result providing both the intersected object
@@ -87,7 +84,7 @@ function resolveCapturedInstance(
   }
 
   const manual = object.userData?.sourceRef as Partial<SourceRef> | undefined;
-  const stamp = object.userData?.__ctsSource as SourceStamp | undefined;
+  const stamp = stampOf(object);
   const location = { ...(stamp ?? {}), ...(manual ?? {}) } as Partial<SourceRef>;
 
   if (!location.file || !location.function || location.line === undefined) {
@@ -167,7 +164,7 @@ export function resolveSourceRef(
       | undefined;
 
     if (manual) {
-      const stamp = current.userData?.__ctsSource as SourceStamp | undefined;
+      const stamp = stampOf(current);
 
       return {
         object: current,
@@ -182,7 +179,7 @@ export function resolveSourceRef(
   current = object;
 
   while (current) {
-    const stamp = current.userData?.__ctsSource as SourceStamp | undefined;
+    const stamp = stampOf(current);
 
     if (stamp) {
       return {

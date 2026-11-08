@@ -12,16 +12,10 @@
 export { resolveSourceRef, resolveObjectAtPoint } from "./resolver.js";
 export type { ResolutionResult } from "./resolver.js";
 
-export {
-  installInstanceProbe,
-  getProbeStats,
-  getInstanceRecord,
-  instanceSourceRefFrom,
-} from "./instanceCapture.js";
-export type { InstanceRecord, ProbeStats } from "./instanceCapture.js";
+export { getInstanceRecord, instanceSourceRefFrom } from "./instanceCapture.js";
+export type { InstanceRecord } from "./instanceCapture.js";
 
-export {
-  setBridgeScene,
-  getBridgeGeneration,
-  connectBridge,
-} from "./bridgeClient.js";
+export { setBridgeScene, getBridgeGeneration } from "./bridgeClient.js";
+
+export { allPropsOf, partsOf, recordOf, stampOf } from "./trace.js";
+export type { ObjectPart } from "./trace.js";

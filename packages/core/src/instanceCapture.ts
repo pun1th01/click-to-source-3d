@@ -18,59 +18,6 @@ export type InstanceRecord = {
   scale: [number, number, number];
 };
 
-/**
- * Diagnostics from the capture probe, which no longer exists.
- *
- * @deprecated Transforms are read live from `instanceMatrix`, so there is no
- * probe to report on. Retained so 0.1.x consumers keep compiling; removed in
- * 0.2.0.
- */
-export type ProbeStats = {
-  installed: boolean;
-  intercepted: number;
-  constructorFill: number;
-  applicationWrites: number;
-  unjoined: number;
-  unfilteredSuspectedFill: number;
-};
-
-const stats: ProbeStats = {
-  installed: false,
-  intercepted: 0,
-  constructorFill: 0,
-  applicationWrites: 0,
-  unjoined: 0,
-  unfilteredSuspectedFill: 0,
-};
-
-/** @deprecated See {@link ProbeStats}. */
-export function getProbeStats(): Readonly<ProbeStats> {
-  return { ...stats };
-}
-
-/**
- * Formerly patched `Matrix4.prototype.clone` and
- * `InstancedMesh.prototype.setMatrixAt` to record transforms as they were
- * written.
- *
- * That design paired each write with an earlier `clone()` of the same matrix,
- * so the canonical placement loop — `mesh.setMatrixAt(i, dummy.matrix)`,
- * passing one shared matrix every iteration — was measured capturing 0 of 500
- * instances, silently. It also had to be installed before the first scene
- * mounted, because writes had no replay.
- *
- * None of that was necessary. `setMatrixAt` copies the matrix into
- * `instanceMatrix`, which `getMatrixAt` reads back at any time, and the same
- * 500 instances decomposed from that buffer agreed with the probe's records
- * on every field. Reading at resolve time covers every way a transform can be
- * written, needs no install ordering, and patches nothing.
- *
- * @deprecated Now a no-op that patches nothing. Removed in 0.2.0.
- */
-export function installInstanceProbe(): void {
-  stats.installed = true;
-}
-
 const scratchMatrix = new THREE.Matrix4();
 const decomposePosition = new THREE.Vector3();
 const decomposeRotation = new THREE.Quaternion();

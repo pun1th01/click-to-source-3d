@@ -32,10 +32,6 @@
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
     },
-    "./probe": {
-      "types": "./dist/probe.d.ts",
-      "default": "./dist/probe.js"
-    },
     "./bridge": {
       "types": "./dist/bridge.d.ts",
       "default": "./dist/bridge.js"
@@ -66,7 +62,7 @@
     "@click-to-source-3d/shared": "0.1.6"
   },
   "peerDependencies": {
-    "three": ">=0.170.0"
+    "three": ">=0.150.0"
   },
   "devDependencies": {
     "@types/three": "^0.170.0",

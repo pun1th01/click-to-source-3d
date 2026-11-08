@@ -54,19 +54,19 @@ variant — is not recoverable from the mesh. Write
     @click-to-source-3d/core           the public API
     @click-to-source-3d/core/devtools  building blocks for an inspector UI
     @click-to-source-3d/core/bridge    answer bridge queries over your own transport
-    @click-to-source-3d/core/probe     deprecated no-op, removed in 0.2.0
 
 `devtools` is what the plugin's inspector is made of, for building a different
 one: `measureObject` (what drawing an object and everything under it costs),
 `pickAt` (the visible object under a point, resolved to its source),
 `HighlightLayer` and `attachHighlight` (a box drawn after a renderer's frame,
 without taking over its loop), `describeMesh`, `editSourceAt` and
-`editSourceFile` (edits through the plugin's endpoint), and
-`connectBridgeOverHot` (the bridge over Vite's HMR channel).
+`editSourceFile` (edits through the plugin's endpoint),
+`connectBridgeOverHot` (the bridge over Vite's HMR channel), and what plain
+three.js code records as it runs: `recordOf`, `stampOf`, `partsOf`, `generatorsOf`.
 
-The `bridge` subpath is only needed if neither of the plugin's transports fits
+The `bridge` subpath is only needed if the plugin's transport doesn't fit
 your setup. Attach a scene with `setBridgeScene()`, then pass each incoming
-query to `answerBridgeQuery` — the same function the built-in channels call,
+query to `answerBridgeQuery` — the same function the built-in channel calls,
 so a custom transport answers identically.
 
 ## License

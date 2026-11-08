@@ -121,6 +121,20 @@ export async function editSourceFile(
 }
 
 /**
+ * Rewrites several literals in one request, all of them or none.
+ *
+ * One request, not one each, because a save can reload the page. A plain three.js
+ * project has nothing to hot-swap a module into, so Vite reloads on the first file
+ * written, and any request not yet sent by then would never be.
+ */
+export async function editSourceMany(
+  edits: EditRequest[],
+  fetchImpl: SourceEditFetch = fetch
+): Promise<void> {
+  await postJson(WRITE_FILE_PATH, { edits }, fetchImpl);
+}
+
+/**
  * Rewrites the literal a stamped value names, by its exact position.
  *
  * The position and the literal's text come from the build step, so no

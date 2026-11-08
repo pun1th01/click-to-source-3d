@@ -17,6 +17,67 @@ function box(name: string, z = 0) {
   return mesh;
 }
 
+describe("pickAt: what a click means", () => {
+  it("skips a mesh whose material draws nothing", () => {
+    const scene = new THREE.Scene();
+    const hidden = box("hidden", 3);
+    (hidden.material as THREE.Material).visible = false;
+    const clear = box("clear", 2);
+    const clearMaterial = clear.material as THREE.Material;
+    clearMaterial.transparent = true;
+    clearMaterial.opacity = 0;
+    scene.add(hidden, clear, box("behind", 0));
+    scene.updateMatrixWorld(true);
+
+    expect(pickAt(scene, cameraLookingAtOrigin(), { x: 0, y: 0 })?.object.name).toBe("behind");
+  });
+
+  it("finds what the camera draws on another layer", () => {
+    const scene = new THREE.Scene();
+    const other = box("on layer 2", 0);
+    other.layers.set(2);
+    scene.add(other);
+    scene.updateMatrixWorld(true);
+
+    const camera = cameraLookingAtOrigin();
+    expect(pickAt(scene, camera, { x: 0, y: 0 })).toBeNull();
+
+    camera.layers.enable(2);
+    expect(pickAt(scene, camera, { x: 0, y: 0 })?.object.name).toBe("on layer 2");
+  });
+
+  // three's default threshold is a whole world unit.
+  it("doesn't let a grid take clicks meant for what stands on it", () => {
+    const scene = new THREE.Scene();
+    const grid = new THREE.GridHelper(20, 20);
+    grid.rotation.x = Math.PI / 2;
+    grid.position.z = 3;
+    scene.add(grid, box("on the grid", 0));
+    scene.updateMatrixWorld(true);
+
+    // Between grid lines, on a canvas where they are about 40 pixels apart.
+    const camera = cameraLookingAtOrigin();
+    const between = new THREE.Vector3(0.5, 0.5, 3).project(camera);
+    expect(pickAt(scene, camera, { x: between.x, y: between.y }, undefined, 720)?.object.name).toBe("on the grid");
+  });
+
+  it("still finds a line when a click lands on it", () => {
+    const scene = new THREE.Scene();
+    const line = new THREE.Line(
+      new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(-5, 0, 0), new THREE.Vector3(5, 0, 0)])
+    );
+    line.name = "line";
+    scene.add(line);
+    scene.updateMatrixWorld(true);
+
+    const camera = cameraLookingAtOrigin();
+    const on = new THREE.Vector3(1, 0, 0).project(camera);
+    const off = new THREE.Vector3(1, 0.5, 0).project(camera);
+    expect(pickAt(scene, camera, { x: on.x, y: on.y }, undefined, 720)?.object.name).toBe("line");
+    expect(pickAt(scene, camera, { x: off.x, y: off.y }, undefined, 720)).toBeNull();
+  });
+});
+
 describe("pickAt", () => {
   it("returns the nearest visible hit, with its provenance", () => {
     const scene = new THREE.Scene();

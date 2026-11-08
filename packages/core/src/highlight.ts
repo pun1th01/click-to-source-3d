@@ -157,6 +157,8 @@ export class HighlightLayer {
         depthWrite: false,
         transparent: true,
         opacity: 0.95,
+        // Its colour says what the box means, whatever the application's look is.
+        toneMapped: false,
       }),
       fill: new THREE.MeshBasicMaterial({
         color: style.color,
@@ -164,6 +166,7 @@ export class HighlightLayer {
         depthWrite: false,
         transparent: true,
         opacity: style.fill,
+        toneMapped: false,
       }),
     };
   }
@@ -235,6 +238,10 @@ export class HighlightLayer {
   }
 }
 
+type AsyncRenderer = {
+  renderAsync?: (scene: THREE.Object3D, camera: THREE.Camera) => Promise<unknown>;
+};
+
 /**
  * Draws a layer after every frame a renderer puts on screen.
  *
@@ -294,9 +301,42 @@ export function attachHighlight(
 
   renderer.render = wrapped as typeof renderer.render;
 
+  // WebGPURenderer can also be driven by renderAsync, which doesn't go through render.
+  const asyncRenderer = renderer as unknown as AsyncRenderer;
+  const originalAsync = asyncRenderer.renderAsync;
+  let wrappedAsync: AsyncRenderer["renderAsync"] | undefined;
+  if (originalAsync) {
+    wrappedAsync = async function (this: THREE.WebGLRenderer, scene, frameCamera) {
+      await originalAsync.call(this, scene, frameCamera);
+
+      if (drawing || !layer.active || this.getRenderTarget() !== null || this.xr?.isPresenting) {
+        return;
+      }
+      const target = camera();
+      if (!target) {
+        return;
+      }
+
+      drawing = true;
+      const autoClear = this.autoClear;
+      this.autoClear = false;
+      try {
+        layer.update();
+        await originalAsync.call(this, layer.scene, target);
+      } finally {
+        this.autoClear = autoClear;
+        drawing = false;
+      }
+    };
+    asyncRenderer.renderAsync = wrappedAsync;
+  }
+
   return () => {
     if (renderer.render === (wrapped as typeof renderer.render)) {
       renderer.render = original;
+    }
+    if (wrappedAsync && asyncRenderer.renderAsync === wrappedAsync) {
+      asyncRenderer.renderAsync = originalAsync;
     }
   };
 }
