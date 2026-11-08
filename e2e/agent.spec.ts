@@ -251,7 +251,40 @@ test.describe("the Agent tab", () => {
     await client.close();
 
     await expect(agentTab(page)).toContainText("No assistant connected", { timeout: 20_000 });
-    await expect(agentTab(page)).toContainText("npx click-to-source-3d init --mcp");
+  });
+
+  test("the Agent tab turns on the MCP server", async ({ page }) => {
+    // Answered here: the dev server would write .mcp.json at this repository's root.
+    // The endpoint has its own tests, against a folder of their own.
+    const requests: string[] = [];
+    let on = false;
+    await page.route("**/__cts/mcp", async (route) => {
+      requests.push(route.request().method());
+      on ||= route.request().method() === "POST";
+      await route.fulfill({
+        json: {
+          folder: "click-to-source",
+          registered: on ? [".mcp.json"] : [],
+          written: on ? [".mcp.json"] : [],
+          problems: [],
+          assistant: "Claude Code",
+        },
+      });
+    });
+    // The way there with no assistant connected: select something, then open the tab.
+    await ready(page);
+    await page.keyboard.press("Alt+Shift+C");
+    const box = await pointOn(page, BOX_LINE);
+    await page.mouse.click(box.x, box.y);
+    await page.locator('cts-devtools [data-cts-open-tab="agent"]').click();
+
+    const button = page.locator('cts-devtools [data-cts-action="mcp-on"]');
+    await expect(button).toContainText("Turn on MCP server");
+    await button.click();
+
+    await expect(agentTab(page).locator('[data-cts-mcp="on"]')).toContainText(".mcp.json");
+    await expect(agentTab(page)).toContainText("Now start Claude Code");
+    expect(requests).toEqual(["GET", "POST"]);
   });
 
   test("a line of the log leads to the object it was about", async ({ page }) => {

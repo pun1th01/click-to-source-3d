@@ -49,6 +49,8 @@ packages/*/test/**/*.js
 packages/*/test/**/*.d.ts
 packages/examples/*.js
 packages/examples/*.d.ts
+# The plain three.js example is written in JavaScript, so its .js files are source.
+!packages/examples-three/src/**/*.js
 
 
 # Playwright

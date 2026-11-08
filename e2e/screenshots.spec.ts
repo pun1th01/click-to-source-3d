@@ -56,6 +56,45 @@ async function treePoint(page: Page) {
   throw new Error("no tree on screen");
 }
 
+test.describe("plain three.js", () => {
+  test.use({ baseURL: "http://localhost:5198", viewport: { width: 1280, height: 860 } });
+
+  test("panel for the terrain, with its calls and its noise function", async ({ page }) => {
+    const world = readFileSync(path.resolve("packages/examples-three/src/world.js"), "utf8").split(/\r?\n/);
+    const terrainLine = world.findIndex((line) => line.includes("const terrain = new THREE.Mesh(")) + 1;
+
+    await page.goto("/");
+    let point: { x: number; y: number } | null = null;
+    await expect
+      .poll(
+        async () => {
+          point = await page.evaluate((line) => {
+            const api = (window as unknown as { __CTS_DEVTOOLS__?: Api }).__CTS_DEVTOOLS__;
+            for (let y = 16; api && y < innerHeight; y += 24) {
+              for (let x = 16; x < innerWidth / 2; x += 24) {
+                const hit = api.describeAt(x, y);
+                if (hit?.file === "src/world.js" && hit.line === line) {
+                  return { x, y };
+                }
+              }
+            }
+            return null;
+          }, terrainLine);
+          return point;
+        },
+        { timeout: 30_000 }
+      )
+      .not.toBeNull();
+
+    await page.keyboard.press("Alt+Shift+C");
+    const { x, y } = point as unknown as { x: number; y: number };
+    await page.mouse.click(x, y);
+    await page.mouse.move(40, 800);
+    await page.waitForTimeout(500);
+    await page.screenshot({ path: path.join(ASSETS, "inspector-three.png") });
+  });
+});
+
 test("panel for the box", async ({ page }) => {
   await ready(page);
   await page.keyboard.press("Alt+Shift+C");

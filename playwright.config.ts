@@ -1,13 +1,14 @@
 import { defineConfig } from "@playwright/test";
 
 /**
- * End-to-end tests against the example app, driven the way a developer would
+ * End-to-end tests against the example apps, driven the way a developer would
  * use the inspector: a key, a click, an edit, a request from an assistant.
  *
  * Locally, set CTS_E2E_CHANNEL=msedge (or chrome) to use an installed browser
  * instead of downloading one. CI installs Chromium.
  */
 const PORT = 5199;
+const THREE_PORT = 5198;
 
 export default defineConfig({
   testDir: "e2e",
@@ -24,10 +25,18 @@ export default defineConfig({
       args: ["--enable-unsafe-swiftshader", "--use-angle=swiftshader"],
     },
   },
-  webServer: {
-    command: `npm run dev -w @click-to-source-3d/examples -- --port ${PORT} --strictPort`,
-    url: `http://localhost:${PORT}`,
-    reuseExistingServer: false,
-    timeout: 120_000,
-  },
+  webServer: [
+    {
+      command: `npm run dev -w @click-to-source-3d/examples -- --port ${PORT} --strictPort`,
+      url: `http://localhost:${PORT}`,
+      reuseExistingServer: false,
+      timeout: 120_000,
+    },
+    {
+      command: `npm run dev -w @click-to-source-3d/examples-three -- --port ${THREE_PORT} --strictPort`,
+      url: `http://localhost:${THREE_PORT}`,
+      reuseExistingServer: false,
+      timeout: 120_000,
+    },
+  ],
 });

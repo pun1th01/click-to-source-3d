@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Click-to-Source 3D: edge cases</title>
+    <style>
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+        background: #10131a;
+        overflow: hidden;
+      }
+      canvas {
+        display: block;
+      }
+      #overlay {
+        position: fixed;
+        inset: 0;
+      }
+      #button {
+        position: fixed;
+        top: 8px;
+        left: 8px;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="overlay"></div>
+    <button id="button">a control on the page</button>
+
+    <script src="/src/classic.js"></script>
+    <script type="module" src="/src/edge-cases.js"></script>
+
+    <script type="module">
+      import * as THREE from "three";
+
+      // A script written in the page, as the three.js examples are.
+      const inPage = new THREE.Mesh(
+        new THREE.BoxGeometry(2, 2, 2),
+        new THREE.MeshBasicMaterial({ color: 0x3399ff })
+      );
+      inPage.name = "in the page";
+      inPage.position.set(-4, 0, 0);
+      window.__edge.scene.add(inPage);
+    </script>
+  </body>
+</html>
