@@ -3,8 +3,11 @@ import {
   OPEN_IN_EDITOR_PATH,
   type AgentActivity,
   type ObjectCost,
-  type SourceStamp,
+  type SourceFunction,
+  type SourceNumbers,
   type StampedValue,
+  type TraceFrame,
+  type UsedFunction,
 } from "@click-to-source-3d/shared";
 import { resolveSourceRef } from "@click-to-source-3d/core";
 import {
@@ -13,6 +16,7 @@ import {
   measureObject,
   ndcFromClient,
   pickAt,
+  recordOf,
   type HotChannel,
   type Pick,
 } from "@click-to-source-3d/core/devtools";
@@ -23,7 +27,7 @@ import { compareTab } from "./compareTab.js";
 import type { Discovery, View } from "./discovery.js";
 import { h, icon, ICONS } from "./dom.js";
 import { ValueEditors } from "./editors.js";
-import { formatBytes, formatCount, plural } from "./format.js";
+import { elementLabel, formatBytes, formatCount, plural } from "./format.js";
 import { copyImage, copyReport, reportMarkdown } from "./report.js";
 import { STYLES } from "./styles.js";
 import {
@@ -31,13 +35,17 @@ import {
   describeTarget,
   findAddress,
   findRefs,
+  generatorsOfTarget,
   isInside,
   kindOf,
   labelOf,
+  modelPathOf,
+  partsOfTarget,
   sameTarget,
   stampOf,
   type Address,
   type Target,
+  type TargetPart,
 } from "./targets.js";
 import { draftOf, parseDraft } from "./values.js";
 
@@ -187,7 +195,8 @@ export class Inspector {
   private refreshGeneration = 0;
   private restoring = false;
   private differencesOnly = false;
-  private readonly openSections = new Set<string>();
+  /** What a person looks at first stays open until they say otherwise. */
+  private readonly openSections = new Set<string>(["called", "uses"]);
   private status: { kind: "ok" | "error"; text: string } | null = null;
   private downAt: { x: number; y: number } | null = null;
   private pendingHover: { view: View; x: number; y: number } | null = null;
@@ -316,8 +325,8 @@ export class Inspector {
     if (on && global.__CTS_MANUAL_OVERLAY__ && !this.noteShown) {
       this.noteShown = true;
       console.info(
-        "[click-to-source] The inspector is built in now. <GenerationTrace />, " +
-          "<SelectionHighlight /> and <ClickToSourceBridge /> can be removed from your app."
+        "[click-to-source] The inspector is built in now. <GenerationTrace /> and " +
+          "<SelectionHighlight /> can be removed from your app."
       );
     }
 
@@ -407,7 +416,7 @@ export class Inspector {
       return;
     }
 
-    const view = this.discovery.forCanvas(event.target);
+    const view = this.discovery.viewAt(event.target, event.clientX, event.clientY);
     if (!view) {
       this.clearHover();
       return;
@@ -442,7 +451,7 @@ export class Inspector {
       return;
     }
 
-    const view = this.discovery.forCanvas(event.target);
+    const view = this.discovery.viewAt(event.target, event.clientX, event.clientY);
     if (!view) {
       return;
     }
@@ -476,7 +485,13 @@ export class Inspector {
     if (!scene || !camera) {
       return null;
     }
-    return pickAt(scene, camera, ndcFromClient(view.canvas, x, y), this.raycaster);
+    return pickAt(
+      scene,
+      camera,
+      ndcFromClient(view.canvas, x, y),
+      this.raycaster,
+      view.canvas.getBoundingClientRect().height
+    );
   }
 
   private hoverAt(view: View, x: number, y: number): void {
@@ -731,6 +746,10 @@ export class Inspector {
     if (this.tab === "compare") {
       this.renderCompare();
     }
+    // Drawn now, so what it shows is current, and so it can ask whether the MCP server is on.
+    if (this.tab === "agent") {
+      this.renderAgent();
+    }
   }
 
   private renderTabs(): void {
@@ -849,9 +868,34 @@ export class Inspector {
         body.append(
           h("div", {
             class: "note",
-            text: `Defined on its parent ${kindOf(resolution.object)}.`,
+            text:
+              stamp?.how === "load"
+                ? `Part of a model loaded here: ${modelPathOf(selection)}.`
+                : `Part of the ${kindOf(resolution.object)} made here: ${modelPathOf(selection)}.`,
           })
         );
+      } else if (stamp?.how === "clone") {
+        body.append(h("div", { class: "note", text: "A clone of another object, made here." }));
+      } else if (stamp?.how === "load") {
+        body.append(h("div", { class: "note", text: "A model loaded here." }));
+      }
+
+      // Placed by JSX, `<primitive object={rock} />`, and made by plain code elsewhere.
+      const made = recordOf(resolution.object)?.stamp;
+      if (made && made !== stamp) {
+        const how = made.how === "load" ? " by a loader" : made.how === "clone" ? " as a clone" : "";
+        const where = made.function === "(top level)" ? " at the top level of the module, " : ` in ${made.function}, `;
+        body.append(
+          h("div", { class: "note made", attrs: { "data-cts-made": "" } }, [
+            `Made${how}${where}`,
+            this.sourceLink(made.file, made.line, made.column),
+          ])
+        );
+      }
+
+      const trace = recordOf(resolution.object)?.trace ?? [];
+      if (trace.length > 0) {
+        body.append(this.calledFromSection(trace));
       }
 
       if (pick.instanceId !== null && resolution.readonly) {
@@ -860,8 +904,19 @@ export class Inspector {
         body.append(this.argsSection(ref));
       }
 
-      if (stamp?.props?.length) {
-        body.append(this.propsSection(stamp));
+      const parts = partsOfTarget(selection);
+      if (parts.some((part) => part.stamp.props?.length)) {
+        body.append(this.propsSection(parts));
+      }
+
+      const functions = generatorsOfTarget(selection);
+      const uses = this.usesSection(functions);
+      if (uses) {
+        body.append(uses);
+      }
+      const numbers = this.numbersSection(functions);
+      if (numbers) {
+        body.append(numbers);
       }
     } else {
       const parents: string[] = [];
@@ -873,8 +928,8 @@ export class Inspector {
         h("div", {
           class: "note",
           text:
-            "Neither it nor any parent was created by JSX in your project. It may " +
-            "come from a library component, a loaded model, or code outside JSX.",
+            "Neither it nor any parent was made by code in your project. It may " +
+            "come from a library or from a loaded model.",
         })
       );
       if (parents.length > 0) {
@@ -1025,10 +1080,22 @@ export class Inspector {
         },
         onSelect: (target) => this.select(target),
         onEntry: (entry) => this.followEntry(entry),
+        setup: agent.setup,
+        setupState: agent.setupState,
+        onTurnOnMcp: () => void agent.turnOnMcp(),
       })
     );
     body.scrollTop = scroll;
+
+    // Asked for once, when there's an assistant to connect and the tab is in view.
+    if (!agent.connected && agent.setup === null && this.panelOpen && this.tab === "agent" && !this.setupAsked) {
+      this.setupAsked = true;
+      void agent.checkSetup();
+    }
   }
+
+  /** Whether the dev server has been asked if the MCP server is registered. */
+  private setupAsked = false;
 
   private showAgentStatus(): void {
     const line = this.bodies?.agent.querySelector("[data-cts-agent-status]");
@@ -1087,30 +1154,194 @@ export class Inspector {
     this.statusLine.setAttribute("role", this.status?.kind === "error" ? "alert" : "status");
   }
 
-  private propsSection(stamp: SourceStamp): HTMLElement {
-    const section = h("div", { class: "section" }, [
-      h("div", { class: "section-title", text: "Properties" }),
-    ]);
-    let element: string | null = null;
+  /** A file and line that opens in the editor. */
+  private sourceLink(file: string, line: number, column?: number): HTMLElement {
+    return h("button", {
+      class: "link mono",
+      text: `${file}:${line}`,
+      title: "Open in editor",
+      attrs: { type: "button" },
+      on: { click: () => void this.open(file, line, column) },
+    });
+  }
 
-    for (const prop of stamp.props ?? []) {
-      if (prop.element !== element) {
-        element = prop.element;
-        section.append(h("div", { class: "element mono", text: `<${prop.element}>` }));
-      }
-      section.append(
-        h("div", { class: "prop" }, [
-          h("div", { class: "label mono", text: prop.name, title: prop.name }),
-          h(
-            "div",
-            { class: "values" },
-            prop.values.map((value, index) => this.editors.editor(stamp.file, prop, value, index))
-          ),
+  private readonlyValue(text: string): HTMLElement {
+    return h("div", { class: "values" }, [
+      h("div", { class: "value ro" }, [h("div", { class: "readonly mono", text })]),
+    ]);
+  }
+
+  /** The calls that led to an object, nearest first, with what each was given. */
+  private calledFromSection(trace: TraceFrame[]): HTMLElement {
+    const content = h("div", {});
+
+    for (const frame of [...trace].reverse()) {
+      const where = frame.calledAt ?? frame;
+      content.append(
+        h("div", { class: "frame", attrs: { "data-cts-frame": frame.name } }, [
+          h("div", { class: "frame-head" }, [
+            h("span", { class: "fn mono", text: frame.name }),
+            this.sourceLink(where.file, where.line, where.column),
+          ]),
+          ...frame.args.map((arg) => {
+            const site = frame.calledAt;
+            return h("div", { class: "prop" }, [
+              h("div", { class: "label mono", text: arg.name, title: arg.name }),
+              arg.literal && site
+                ? h("div", { class: "values" }, [
+                    this.editors.editor(
+                      site.file,
+                      { element: frame.name, name: arg.name, array: false, values: [arg.literal] },
+                      arg.literal,
+                      0,
+                      { live: false }
+                    ),
+                  ])
+                : this.readonlyValue(arg.value),
+            ]);
+          }),
         ])
       );
     }
 
+    return this.foldable("called", ["Called from"], content);
+  }
+
+  private propsSection(parts: TargetPart[]): HTMLElement {
+    const section = h("div", { class: "section" }, [
+      h("div", { class: "section-title", text: "Properties" }),
+    ]);
+
+    parts.forEach((part, partIndex) => {
+      const { stamp } = part;
+      let element: string | null = null;
+
+      for (const prop of stamp.props ?? []) {
+        if (prop.element !== element) {
+          element = prop.element;
+          section.append(
+            h("div", { class: "element mono" }, [
+              elementLabel(prop.element),
+              // The first is what the panel's heading already names.
+              partIndex > 0 ? this.sourceLink(stamp.file, stamp.line, stamp.column) : null,
+            ])
+          );
+        }
+        section.append(
+          h("div", { class: "prop" }, [
+            h("div", { class: "label mono", text: prop.name, title: prop.name }),
+            h(
+              "div",
+              { class: "values" },
+              prop.values.map((value, index) =>
+                this.editors.editor(stamp.file, prop, value, index, { live: part.live })
+              )
+            ),
+          ])
+        );
+      }
+    });
+
     return section;
+  }
+
+  /** The numbers on the lines of a function, each with the line it is on. */
+  private numbersBlock(file: string, owner: string, groups: SourceNumbers[]): HTMLElement {
+    return h(
+      "div",
+      { class: "numbers" },
+      groups.map((group) =>
+        h("div", { class: "number-line" }, [
+          h("div", { class: "line-text mono", title: group.text }, [
+            h("span", { class: "line-no", text: String(group.line) }),
+            group.text,
+          ]),
+          h(
+            "div",
+            { class: "values" },
+            group.values.map((value, index) =>
+              this.editors.editor(
+                file,
+                { element: owner, name: `line ${group.line}`, array: true, values: group.values },
+                value,
+                index,
+                { live: false }
+              )
+            )
+          ),
+        ])
+      )
+    );
+  }
+
+  /** The helpers behind an object: its noise function, and what that calls in turn. */
+  private usesSection(functions: SourceFunction[]): HTMLElement | null {
+    const seen = new Set<string>();
+    const uses: UsedFunction[] = [];
+    for (const fn of functions) {
+      for (const use of fn.uses) {
+        const key = use.file ? `${use.file}:${use.line}` : `${use.package}#${use.name}`;
+        if (!seen.has(key)) {
+          seen.add(key);
+          uses.push(use);
+        }
+      }
+    }
+    if (uses.length === 0) {
+      return null;
+    }
+
+    const content = h("div", {});
+    for (const use of uses) {
+      const signature = use.params ? `${use.name}(${use.params.join(", ")})` : use.name;
+      const head = h("div", { class: "use-head" }, [
+        h("span", { class: "fn mono", text: signature }),
+        use.file && use.line !== undefined
+          ? this.sourceLink(use.file, use.line, use.column)
+          : h("span", { class: "package mono", text: use.package ?? "" }),
+      ]);
+      const row = h("div", { class: "use", attrs: { "data-cts-use": use.name } }, [
+        use.file && use.numbers?.length
+          ? this.foldable(
+              `use:${use.file}:${use.name}`,
+              [head],
+              this.numbersBlock(use.file, use.name, use.numbers)
+            )
+          : head,
+      ]);
+      row.style.marginLeft = `${use.depth * 12}px`;
+      content.append(row);
+    }
+
+    return this.foldable("uses", ["Uses"], content);
+  }
+
+  /** Every other number in the functions that made an object. */
+  private numbersSection(functions: SourceFunction[]): HTMLElement | null {
+    const withNumbers = functions.filter((fn) => fn.numbers.length > 0);
+    if (withNumbers.length === 0) {
+      return null;
+    }
+
+    const count = withNumbers.reduce(
+      (total, fn) => total + fn.numbers.reduce((sum, group) => sum + group.values.length, 0),
+      0
+    );
+    const content = h("div", {});
+    for (const fn of withNumbers) {
+      if (withNumbers.length > 1) {
+        content.append(
+          h("div", { class: "element mono" }, [fn.name, this.sourceLink(fn.file, fn.line, fn.column)])
+        );
+      }
+      content.append(this.numbersBlock(fn.file, fn.name, fn.numbers));
+    }
+
+    return this.foldable(
+      "numbers",
+      ["Numbers", h("span", { class: "headline mono", text: String(count) })],
+      content
+    );
   }
 
   /** Values from a hand-written sourceRef, edited by name as before. */
@@ -1582,7 +1813,14 @@ export class Inspector {
       file: ref?.file ?? null,
       line: ref?.line ?? null,
       function: ref?.function ?? null,
-      props: stampOf(selection.pick.resolution?.object)?.props ?? [],
+      ...(({ props, trace, generators, how, modelPath, materials }) => ({
+        props,
+        trace,
+        generators,
+        how,
+        modelPath,
+        materials,
+      }))(describeTarget(selection)),
     };
   }
 

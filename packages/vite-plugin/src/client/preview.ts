@@ -5,10 +5,35 @@ import type { StampedProp } from "@click-to-source-3d/shared";
 export type ValuePreview = {
   /** The constructor parameter this value is, for a geometry's `args`. */
   paramName?: string;
-  set(value: number): void;
+  /** A colour, which isn't a quantity, so a slider has nothing to do. */
+  isColor?: boolean;
+  /** What some typed text means here, or null if it can't be shown yet. */
+  parse(text: string): number | string | null;
+  set(value: number | string): void;
   /** Puts the value the scene had before the preview back. */
   reset(): void;
 };
+
+function parseNumber(text: string): number | null {
+  const number = Number(text);
+  return text.trim() !== "" && Number.isFinite(number) ? number : null;
+}
+
+/** A colour as a person would type one: `#c2643c`, `0xc2643c`, `tomato`. */
+function colorParser(color: THREE.Color) {
+  const names = (color.constructor as { NAMES?: Record<string, number> }).NAMES ?? {};
+  return (text: string): number | string | null => {
+    const trimmed = text.trim();
+    if (/^#([0-9a-f]{3}|[0-9a-f]{6})$/i.test(trimmed)) {
+      return trimmed;
+    }
+    const number = parseNumber(trimmed);
+    if (number !== null) {
+      return Number.isInteger(number) && number >= 0 && number <= 0xffffff ? number : null;
+    }
+    return names[trimmed.toLowerCase()] !== undefined ? trimmed.toLowerCase() : null;
+  };
+}
 
 type Holder = Record<string, unknown>;
 
@@ -38,6 +63,7 @@ function componentPreview(current: Holder, index: number): ValuePreview | null {
   const original = current[key] as number;
 
   return {
+    parse: parseNumber,
     set: (value) => {
       current[key] = value;
     },
@@ -53,6 +79,7 @@ function scalarPreview(holder: Holder, key: string): ValuePreview | null {
 
   if (typeof current === "number") {
     return {
+      parse: parseNumber,
       set: (value) => {
         holder[key] = value;
       },
@@ -62,11 +89,25 @@ function scalarPreview(holder: Holder, key: string): ValuePreview | null {
     };
   }
 
+  // Before the vector check: a colour has setScalar too, which would turn
+  // `color: 0xff0000` into a shade of grey.
+  const color = current as THREE.Color | null | undefined;
+  if (color?.isColor) {
+    const original = color.clone();
+    return {
+      isColor: true,
+      parse: colorParser(color),
+      set: (value) => void color.set(value),
+      reset: () => void color.copy(original),
+    };
+  }
+
   const vector = current as Partial<THREE.Vector3> | null | undefined;
   if (vector?.setScalar && vector.clone && vector.copy) {
     const original = vector.clone();
     return {
-      set: (value) => void vector.setScalar!(value),
+      parse: parseNumber,
+      set: (value) => void vector.setScalar!(value as number),
       reset: () => void vector.copy!(original),
     };
   }
@@ -91,6 +132,7 @@ export class PreviewSession {
     make: new (...args: unknown[]) => THREE.BufferGeometry;
   } | null = null;
   private readonly touched = new Set<ValuePreview>();
+  private untouched: boolean | null = null;
 
   constructor(private readonly object: THREE.Object3D) {}
 
@@ -108,6 +150,8 @@ export class PreviewSession {
 
     return {
       paramName: preview.paramName,
+      isColor: preview.isColor,
+      parse: preview.parse,
       set: (value) => {
         this.touched.add(preview);
         preview.set(value);
@@ -162,7 +206,7 @@ export class PreviewSession {
     const mesh = this.object as THREE.Mesh;
     const original = mesh.geometry as (THREE.BufferGeometry & { parameters?: Record<string, unknown> }) | undefined;
 
-    if (!original?.parameters) {
+    if (!original?.parameters || !this.isUntouched(original)) {
       return null;
     }
 
@@ -187,6 +231,7 @@ export class PreviewSession {
 
     return {
       paramName: state.keys[index],
+      parse: parseNumber,
       set: (value) => {
         state.values[index] = value;
         rebuild();
@@ -198,6 +243,31 @@ export class PreviewSession {
         }
       },
     };
+  }
+
+  /**
+   * Whether a geometry is still just what its constructor made. Code that moves the
+   * vertices afterwards, which is what terrain does, or that bakes in a rotation,
+   * isn't captured by `parameters`, so a rebuild would show a flat plane and call
+   * it a preview. Those values can still be typed and saved.
+   */
+  private isUntouched(geometry: THREE.BufferGeometry & { parameters?: Record<string, unknown> }): boolean {
+    if (this.untouched !== null) {
+      return this.untouched;
+    }
+    this.untouched = false;
+    try {
+      const make = geometry.constructor as new (...args: unknown[]) => THREE.BufferGeometry;
+      const fresh = new make(...Object.values(geometry.parameters as object));
+      const now = geometry.getAttribute("position")?.array;
+      const then = fresh.getAttribute("position")?.array;
+      this.untouched =
+        !!now && !!then && now.length === then.length && now.every((value, index) => value === then[index]);
+      fresh.dispose();
+    } catch {
+      // A subclass that can't be built again from its parameters.
+    }
+    return this.untouched;
   }
 
   /** Puts everything back as it was. */

@@ -2,11 +2,13 @@ import {
   AGENT_ACTIVITY_EVENT,
   AGENT_SELECTION_EVENT,
   AGENT_STATE_EVENT,
+  MCP_SETUP_PATH,
   type ActivityTarget,
   type AgentActivity,
   type AgentInfo,
   type AgentState,
   type BridgeQuery,
+  type McpSetupStatus,
   type ObjectRef,
   type PageSelection,
 } from "@click-to-source-3d/shared";
@@ -36,6 +38,10 @@ type Look = { targets: Target[]; timer: ReturnType<typeof setTimeout> | null };
 export class AgentLink {
   agents: AgentInfo[] = [];
   log: AgentActivity[] = [];
+  /** Whether the assistant tools are set up in this project, once asked. */
+  setup: McpSetupStatus | null = null;
+  /** The button is busy, or why it couldn't do it. */
+  setupState: "idle" | "working" | { error: string } = "idle";
 
   private readonly listeners = new Set<() => void>();
   private readonly pointedOut: Look = { targets: [], timer: null };
@@ -67,10 +73,51 @@ export class AgentLink {
     // After a dev-server restart the server has forgotten what is pointed at.
     // Registered after the bridge's hello, so it arrives after it.
     hot.on("vite:ws:connect", (() => {
+      this.disconnected = false;
       if (this.lastPublished) {
         this.hot.send(AGENT_SELECTION_EVENT, this.lastPublished);
       }
     }) as (data: never) => void);
+
+    hot.on("vite:ws:disconnect", (() => {
+      this.disconnected = true;
+    }) as (data: never) => void);
+  }
+
+  /** Asks the dev server whether the MCP server is registered here. */
+  async checkSetup(): Promise<void> {
+    try {
+      const response = await fetch(MCP_SETUP_PATH);
+      if (response.ok) {
+        this.setup = (await response.json()) as McpSetupStatus;
+        this.notify();
+      }
+    } catch {
+      // Asked again when the tab is next drawn.
+    }
+  }
+
+  /** Registers the MCP server here, as `npx click-to-source-3d init --mcp` would. */
+  async turnOnMcp(): Promise<void> {
+    if (this.setupState === "working") {
+      return;
+    }
+    this.setupState = "working";
+    this.notify();
+    try {
+      const response = await fetch(MCP_SETUP_PATH, { method: "POST" });
+      const payload = (await response.json().catch(() => ({}))) as McpSetupStatus & { error?: string };
+      if (!response.ok) {
+        throw new Error(payload.error ?? `The dev server said ${response.status}`);
+      }
+      this.setup = payload;
+      this.setupState = payload.problems.length > 0 && payload.registered.length === 0
+        ? { error: payload.problems.map((problem) => `${problem.file}: ${problem.reason}`).join("; ") }
+        : "idle";
+    } catch (error) {
+      this.setupState = { error: error instanceof Error ? error.message : "Something went wrong" };
+    }
+    this.notify();
   }
 
   onChange(listener: () => void): void {
@@ -87,10 +134,17 @@ export class AgentLink {
     return this.agents.length > 0;
   }
 
+  /** The dev server has gone, and hasn't come back yet. */
+  private disconnected = false;
+
   /** Tells the dev server what the developer now has selected and pointed at. */
   publish(selection: PageSelection): void {
     this.lastPublished = selection;
-    this.hot.send(AGENT_SELECTION_EVENT, selection);
+    // With the dev server gone Vite logs an error for each send, one per click here.
+    // What was last published goes out when it comes back.
+    if (!this.disconnected) {
+      this.hot.send(AGENT_SELECTION_EVENT, selection);
+    }
   }
 
   // ── Outlining what the assistant is looking at ────────────────────────────

@@ -17,6 +17,18 @@ import { Inspector } from "./inspector.js";
  * and, when the project uses R3F, R3F's registry of canvases.
  */
 
+// What the plugin's transform adds calls to, in the application's own modules.
+export {
+  ctsCall,
+  ctsEnter,
+  ctsLeave,
+  ctsLoadAsync,
+  ctsNew,
+  ctsOnLoad,
+  ctsSite,
+  ctsVia,
+} from "@click-to-source-3d/core/devtools";
+
 export type DevtoolsOptions = {
   inspector: boolean;
   bridge: boolean;
@@ -29,6 +41,12 @@ export function startDevtools(setup: {
   r3fRoots?: R3FRoots | undefined;
   options: DevtoolsOptions;
 }): void {
+  // A worker can reach this too, through a module it shares with the page. It has
+  // no page to inspect, and the recording functions above work without any of this.
+  if (typeof document === "undefined") {
+    return;
+  }
+
   const global = globalThis as { __CTS_DEVTOOLS__?: unknown };
 
   // Once per page. The virtual module can be evaluated again by HMR; a second

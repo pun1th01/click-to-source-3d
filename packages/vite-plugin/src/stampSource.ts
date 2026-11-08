@@ -1,11 +1,10 @@
 import path from "node:path";
-import { parse } from "@babel/parser";
 import MagicString from "magic-string";
-import type {
-  SourceStamp,
-  StampedProp,
-  StampedValue,
-} from "@click-to-source-3d/shared";
+import type { SourceStamp, StampedProp } from "@click-to-source-3d/shared";
+import { factAt, parseSource, type FunctionFact, type Node } from "./trace/facts.js";
+import { describeFunction, instrument, type TraceNames } from "./trace/instrument.js";
+import type { TracePlan } from "./trace/project.js";
+import { constantsOf, valueDescriber } from "./trace/values.js";
 
 /**
  * Host elements that carry no transform of their own and are never the answer
@@ -48,14 +47,17 @@ const DOM_TAGS = new Set([
 export type StampOptions = {
   /** Absolute path the emitted `file` values are made relative to. */
   root: string;
-};
-
-type Node = {
-  type: string;
-  start?: number | null;
-  end?: number | null;
-  loc?: { start: { line: number; column: number } } | null;
-  [key: string]: unknown;
+  /**
+   * Also record where objects made by plain three.js code come from, for a module
+   * the dev server is about to send to the browser. Without it, only JSX is
+   * stamped, which is all a production build can ever want.
+   */
+  trace?: {
+    program: Node;
+    plan: TracePlan;
+    /** The module the recording functions are imported from. */
+    client: string;
+  };
 };
 
 /**
@@ -74,166 +76,8 @@ const SKIPPED_PROPS = new Set([
   "material",
 ]);
 
-/** Longest expression text kept for a value the panel can only show. */
-const MAX_EXPRESSION = 80;
-
 function isGeometryOrMaterial(name: string): boolean {
   return SKIPPED_SUFFIXES.some((suffix) => name.endsWith(suffix));
-}
-
-function isLiteral(node: Node | undefined): boolean {
-  if (!node) {
-    return false;
-  }
-  if (
-    node.type === "StringLiteral" ||
-    node.type === "NumericLiteral" ||
-    node.type === "BooleanLiteral" ||
-    node.type === "NullLiteral"
-  ) {
-    return true;
-  }
-  return (
-    node.type === "UnaryExpression" &&
-    node.operator === "-" &&
-    (node.argument as Node | undefined)?.type === "NumericLiteral"
-  );
-}
-
-function literalValue(node: Node): string | number | boolean | null {
-  if (node.type === "NullLiteral") {
-    return null;
-  }
-  if (node.type === "UnaryExpression") {
-    return -((node.argument as Node).value as number);
-  }
-  return node.value as string | number | boolean;
-}
-
-/** Every name bound by a pattern: `a`, `{ a, b: [c] }`, `...rest`, `x = 1`. */
-function patternNames(pattern: Node | null | undefined, out: string[] = []): string[] {
-  if (!pattern) {
-    return out;
-  }
-  switch (pattern.type) {
-    case "Identifier":
-      out.push(pattern.name as string);
-      break;
-    case "AssignmentPattern":
-      patternNames(pattern.left as Node, out);
-      break;
-    case "RestElement":
-      patternNames(pattern.argument as Node, out);
-      break;
-    case "ObjectPattern":
-      for (const property of pattern.properties as Node[]) {
-        patternNames(
-          (property.type === "RestElement" ? property : property.value) as Node,
-          out
-        );
-      }
-      break;
-    case "ArrayPattern":
-      for (const element of pattern.elements as Array<Node | null>) {
-        patternNames(element, out);
-      }
-      break;
-    case "TSParameterProperty":
-      patternNames(pattern.parameter as Node, out);
-      break;
-  }
-  return out;
-}
-
-/**
- * The constants an identifier in JSX can safely be followed to.
- *
- * `args={[1.2, BOX_HEIGHT]}` is only editable at `const BOX_HEIGHT = 1.4`, and
- * only if that declaration is what the identifier means. Scope is not
- * modelled, so the rule is conservative instead: a name resolves only when the
- * file binds it exactly once, by a `const` with a literal value. A parameter,
- * a `let`, an import or a second declaration of the same name anywhere in the
- * file makes it ambiguous, and the value is shown read-only rather than
- * edited at a declaration that may not be the one in scope.
- */
-function constantsOf(program: Node): Map<string, Node> {
-  const bindings = new Map<string, number>();
-  const literals = new Map<string, Node>();
-  const bind = (name: string) => bindings.set(name, (bindings.get(name) ?? 0) + 1);
-
-  const walk = (node: Node | null | undefined, inConst: boolean) => {
-    if (!node || typeof node.type !== "string") {
-      return;
-    }
-
-    switch (node.type) {
-      case "VariableDeclaration":
-        for (const declarator of node.declarations as Node[]) {
-          for (const name of patternNames(declarator.id as Node)) {
-            bind(name);
-          }
-          const id = declarator.id as Node;
-          const init = declarator.init as Node | undefined;
-          if (node.kind === "const" && id.type === "Identifier" && isLiteral(init)) {
-            literals.set(id.name as string, init!);
-          }
-          walk(init, false);
-        }
-        return;
-      case "FunctionDeclaration":
-      case "FunctionExpression":
-      case "ArrowFunctionExpression":
-      case "ObjectMethod":
-      case "ClassMethod":
-        if (node.type === "FunctionDeclaration" && (node.id as Node | null)) {
-          bind((node.id as Node).name as string);
-        }
-        for (const param of node.params as Node[]) {
-          for (const name of patternNames(param)) {
-            bind(name);
-          }
-        }
-        break;
-      case "ClassDeclaration":
-        if (node.id as Node | null) {
-          bind((node.id as Node).name as string);
-        }
-        break;
-      case "ImportDeclaration":
-        for (const specifier of node.specifiers as Node[]) {
-          bind((specifier.local as Node).name as string);
-        }
-        return;
-      case "CatchClause":
-        for (const name of patternNames(node.param as Node | null)) {
-          bind(name);
-        }
-        break;
-    }
-
-    for (const key of Object.keys(node)) {
-      if (key === "loc" || key.endsWith("Comments")) {
-        continue;
-      }
-      const value = node[key];
-      if (Array.isArray(value)) {
-        for (const item of value) {
-          walk(item as Node, inConst);
-        }
-      } else if (value && typeof value === "object") {
-        walk(value as Node, inConst);
-      }
-    }
-  };
-
-  walk(program, false);
-
-  for (const name of [...literals.keys()]) {
-    if (bindings.get(name) !== 1) {
-      literals.delete(name);
-    }
-  }
-  return literals;
 }
 
 /**
@@ -391,10 +235,19 @@ function enclosingFunctionName(ancestors: Node[], file: string): string {
  * every visitor. Normalising here means the opt-in production mode cannot leak
  * it even by accident.
  */
-function relativeFile(root: string, filename: string): string {
+export function relativeFile(root: string, filename: string): string {
   const relative = path.relative(root, filename);
 
   return relative.split(path.sep).join("/");
+}
+
+/** A name that means nothing else in this file. */
+function freeName(code: string, base: string): string {
+  let name = base;
+  while (code.includes(name)) {
+    name += "_";
+  }
+  return name;
 }
 
 /**
@@ -409,21 +262,25 @@ export function stampSource(
   filename: string,
   options: StampOptions
 ): { code: string; map: ReturnType<MagicString["generateMap"]> } | null {
+  const { trace } = options;
+
   // Measured at ~8ms to parse a 400-line .tsx that turned out to have nothing
   // to stamp — paid on every dev-server transform of every such module.
-  if (!MAY_CONTAIN_HOST_ELEMENT.test(code)) {
+  const mayHaveElements = MAY_CONTAIN_HOST_ELEMENT.test(code);
+  if (!mayHaveElements && !trace) {
     return null;
   }
 
-  const ast = parse(code, {
-    sourceType: "module",
-    errorRecovery: true,
-    plugins: ["jsx", "typescript"],
-  });
+  // A file this can't read isn't this plugin's to complain about: whatever
+  // compiles it next says what is wrong, and says it better.
+  const program = trace?.program ?? parseSource(code, filename);
+  if (!program) {
+    return null;
+  }
 
   const magic = new MagicString(code);
   const file = relativeFile(options.root, filename);
-  const constants = constantsOf(ast.program as unknown as Node);
+  const describeValue = valueDescriber(code, constantsOf(program));
   const stamps: SourceStamp[] = [];
 
   // Every stamp in the module lives in one table, declared once, and an
@@ -431,49 +288,47 @@ export function stampSource(
   // would allocate it on every render, and now that a stamp carries its
   // element's props, would repeat them through the JSX as well. The name is
   // lengthened until it collides with nothing in the file.
-  let table = "__ctsStamps";
-  while (code.includes(table)) {
-    table += "_";
-  }
+  //
+  // Plain code can run before the module's body does, when a circular import
+  // calls one of its functions, so there the tables are built on first use by
+  // a hoisted function rather than held in a const that isn't initialised yet.
+  const data = trace ? freeName(code, "__ctsData") : "";
+  const table = trace ? `${data}().s` : freeName(code, "__ctsStamps");
 
-  const ancestors: Node[] = [];
+  /** Each stamp's function, as an index into the table of functions. */
+  const generators = new Map<number, number>();
+  const functions: Array<{ fact: FunctionFact; holder: string | null }> = [];
+  const functionKeys = new Map<string, number>();
+  /** Literals shown as an object's values, which needn't be listed again as numbers. */
+  const shown = new Set<string>();
 
-  /** One value as the panel shows it: a literal it can edit, or text it cannot. */
-  const describeValue = (node: Node | null | undefined): StampedValue => {
-    if (!node || node.type === "SpreadElement") {
-      return { raw: node ? code.slice(node.start as number, node.end as number) : "", editable: false };
+  const functionIndex = (fact: FunctionFact, holder: string | null): number => {
+    const key = fact.kind === "statement" ? `${fact.id}|${holder ?? ""}` : fact.id;
+    let index = functionKeys.get(key);
+    if (index === undefined) {
+      index = functions.length;
+      functions.push({ fact, holder });
+      functionKeys.set(key, index);
     }
+    return index;
+  };
 
-    if (isLiteral(node)) {
-      return {
-        raw: code.slice(node.start as number, node.end as number),
-        value: literalValue(node),
-        editable: true,
-        line: node.loc!.start.line,
-        column: node.loc!.start.column + 1,
-      };
-    }
-
-    if (node.type === "Identifier") {
-      const declared = constants.get(node.name as string);
-      if (declared) {
-        return {
-          raw: code.slice(declared.start as number, declared.end as number),
-          value: literalValue(declared),
-          editable: true,
-          line: declared.loc!.start.line,
-          column: declared.loc!.start.column + 1,
-          via: node.name as string,
-        };
+  const addStamp = (stamp: SourceStamp, fact: FunctionFact | undefined, holder: string | null): number => {
+    stamps.push(stamp);
+    for (const prop of stamp.props ?? []) {
+      for (const value of prop.values) {
+        if (value.editable && value.line !== undefined) {
+          shown.add(`${value.line}:${value.column}`);
+        }
       }
     }
-
-    const text = code.slice(node.start as number, node.end as number).replace(/\s+/g, " ");
-    return {
-      raw: text.length > MAX_EXPRESSION ? `${text.slice(0, MAX_EXPRESSION - 1)}…` : text,
-      editable: false,
-    };
+    if (fact) {
+      generators.set(stamps.length - 1, functionIndex(fact, holder));
+    }
+    return stamps.length - 1;
   };
+
+  const ancestors: Node[] = [];
 
   /** The props written on one opening element, as the panel lists them. */
   const propsOf = (opening: Node, element: string): StampedProp[] => {
@@ -590,8 +445,8 @@ export function stampSource(
     if (props.length > 0) {
       entry.props = props;
     }
-    stamps.push(entry);
-    const stamp = `${table}[${stamps.length - 1}]`;
+    const fact = trace ? factAt(trace.plan.facts, element.start as number) : undefined;
+    const stamp = `${table}[${addStamp(entry, fact, null)}]`;
 
     // With no explicit userData the stamp is a pierced prop, which R3F
     // resolves as `object.userData.__ctsSource = stamp`, adding one key to
@@ -660,6 +515,7 @@ export function stampSource(
     if (!value || value.type !== "JSXExpressionContainer") {
       // userData="literal" is not a shape we can merge into; leave it alone
       // rather than guessing.
+      generators.delete(stamps.length - 1);
       stamps.pop();
       return false;
     }
@@ -672,21 +528,71 @@ export function stampSource(
     return true;
   };
 
-  visit(ast.program as unknown as Node);
-
-  if (stamps.length === 0) {
-    return null;
+  if (mayHaveElements) {
+    visit(program);
   }
 
   // On the first line, so no line of the module moves and a stack trace or a
   // stamped line reads the same with or without a sourcemap. After any
   // directive prologue, which has to stay first to mean anything.
-  const directives = ((ast.program as unknown as Node).directives ?? []) as Node[];
+  const directives = (program.directives ?? []) as Node[];
   const tableAt = directives.length > 0 ? (directives[directives.length - 1].end as number) : 0;
-  magic.appendLeft(
-    tableAt,
-    `${tableAt > 0 ? " " : ""}const ${table} = ${JSON.stringify(stamps)};${tableAt > 0 ? "" : " "}`
-  );
+  const lead = tableAt === 0 ? "" : code[tableAt - 1] === ";" ? " " : "; ";
+
+  if (trace) {
+    const names: TraceNames = {
+      stamps: table,
+      functions: `${data}().f`,
+      calls: `${data}().c`,
+      cNew: freeName(code, "__ctsNew"),
+      cEnter: freeName(code, "__ctsEnter"),
+      cLeave: freeName(code, "__ctsLeave"),
+      cCall: freeName(code, "__ctsCall"),
+      cSite: freeName(code, "__ctsSite"),
+      cVia: freeName(code, "__ctsVia"),
+      cOnLoad: freeName(code, "__ctsOnLoad"),
+      cLoadAsync: freeName(code, "__ctsLoadAsync"),
+    };
+    const { calls } = instrument(program, {
+      code,
+      magic,
+      file,
+      plan: trace.plan,
+      names,
+      describeValue,
+      addStamp,
+      functionIndex,
+    });
+
+    if (!magic.hasChanged()) {
+      return null;
+    }
+
+    const functionTable = functions
+      .map(({ fact, holder }) => JSON.stringify(describeFunction(fact, holder, trace.plan, shown)))
+      .join(",");
+    const stampTable = stamps
+      .map((stamp, index) => {
+        const generator = generators.get(index);
+        const json = JSON.stringify(stamp);
+        return generator === undefined ? json : `${json.slice(0, -1)},"generator":f[${generator}]}`;
+      })
+      .join(",");
+
+    magic.appendLeft(
+      tableAt,
+      `${lead}import { ctsNew as ${names.cNew}, ctsEnter as ${names.cEnter}, ctsLeave as ${names.cLeave}, ctsCall as ${names.cCall}, ctsSite as ${names.cSite}, ctsVia as ${names.cVia}, ctsOnLoad as ${names.cOnLoad}, ctsLoadAsync as ${names.cLoadAsync} } from ${JSON.stringify(trace.client)}; ` +
+        `function ${data}(){if(!${data}.v){var f=[${functionTable}];${data}.v={f:f,c:${JSON.stringify(calls)},s:[${stampTable}]}}return ${data}.v}${tableAt > 0 ? "" : " "}`
+    );
+  } else {
+    if (stamps.length === 0) {
+      return null;
+    }
+    magic.appendLeft(
+      tableAt,
+      `${lead}const ${table} = ${JSON.stringify(stamps)};${tableAt > 0 ? "" : " "}`
+    );
+  }
 
   return {
     code: magic.toString(),

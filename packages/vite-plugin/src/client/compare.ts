@@ -1,5 +1,5 @@
 import type { ObjectCost, PointedObject, StampedProp } from "@click-to-source-3d/shared";
-import { formatBytes, formatCount, valueText, vectorText } from "./format.js";
+import { formatBytes, formatCount, usesOf, valueText, vectorText } from "./format.js";
 
 export type CompareRow = { group: string; label: string; a: string; b: string; differs: boolean };
 
@@ -42,6 +42,18 @@ export function compareRows(a: PointedObject, b: PointedObject): CompareRow[] {
   add("Source", "type", a.kind, b.kind);
   add("Source", "component", a.source?.function ?? NOTHING, b.source?.function ?? NOTHING);
   add("Source", "where", where(a), where(b));
+
+  const called = (object: PointedObject) =>
+    [...object.trace]
+      .reverse()
+      .map((frame) => `${frame.name}(${frame.args.map((arg) => arg.value).join(", ")})`)
+      .join(" ← ") || NOTHING;
+  const uses = (object: PointedObject) =>
+    usesOf(object)
+      .map((use) => use.name)
+      .join(", ") || NOTHING;
+  add("Source", "called from", called(a), called(b));
+  add("Source", "uses", uses(a), uses(b));
 
   add("Transform", "position", vectorText(a.transform.position), vectorText(b.transform.position));
   add("Transform", "rotation", vectorText(a.transform.rotation), vectorText(b.transform.rotation));

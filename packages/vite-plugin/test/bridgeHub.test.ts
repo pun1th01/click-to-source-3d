@@ -1,34 +1,20 @@
 import { describe, expect, it } from "vitest";
-import { EventEmitter } from "node:events";
-import type { IncomingMessage, ServerResponse } from "node:http";
-import { BridgeHub } from "../src/bridgeHub.js";
+import { BridgeHub, type BridgeEnvelope } from "../src/bridgeHub.js";
 
-/** A ServerResponse stand-in that records what was written to the stream. */
-function fakePage(url = "http://localhost:5173/") {
-  const emitter = new EventEmitter();
-  const written: string[] = [];
-
-  const response = Object.assign(emitter, {
-    writeHead: () => response,
-    write: (chunk: string) => {
-      written.push(chunk);
-      return true;
-    },
-    end: () => undefined,
-  }) as unknown as ServerResponse;
-
-  const request = { headers: { referer: url } } as unknown as IncomingMessage;
+/** A page on its own connection, recording the questions it is asked. */
+function fakePage(url = "http://localhost:5173/", session: string | null = null) {
+  const sent: BridgeEnvelope[] = [];
+  const key = {};
+  let attachedTo: BridgeHub | null = null;
 
   return {
-    request,
-    response,
-    written,
-    /** The query envelope most recently pushed to this page. */
-    lastQuery: () => {
-      const data = written.filter((w) => w.startsWith("data: ")).pop();
-      return data ? JSON.parse(data.slice(6)) : null;
+    attach(hub: BridgeHub) {
+      attachedTo = hub;
+      return hub.attach({ send: (envelope) => sent.push(envelope) }, { key, session, url });
     },
-    close: () => emitter.emit("close"),
+    /** The question most recently put to this page. */
+    lastQuery: () => sent[sent.length - 1] ?? null,
+    close: () => attachedTo?.detach(key),
   };
 }
 
@@ -44,10 +30,10 @@ describe("BridgeHub lifecycle", () => {
   it("answers when one page is attached", async () => {
     const hub = new BridgeHub();
     const page = fakePage();
-    hub.handleEvents(page.request, page.response);
+    page.attach(hub);
 
     const pending = hub.query({ kind: "list_scene_provenance" });
-    const envelope = page.lastQuery();
+    const envelope = page.lastQuery()!;
     hub.handleReply({ requestId: envelope.requestId, result: { status: "ready" } });
 
     expect(await pending).toEqual({
@@ -57,13 +43,13 @@ describe("BridgeHub lifecycle", () => {
     });
   });
 
-  // A reload closes the old stream before the replacement connects — measured
+  // A reload closes the old socket before the replacement connects — measured
   // at 23ms against a real browser. The hub therefore knows it has no page,
   // and says so at once rather than waiting to find out.
   it("reports disconnected immediately during a reload", async () => {
     const hub = new BridgeHub();
     const first = fakePage();
-    hub.handleEvents(first.request, first.response);
+    first.attach(hub);
     expect(hub.pageCount()).toBe(1);
 
     first.close();
@@ -77,15 +63,15 @@ describe("BridgeHub lifecycle", () => {
   it("answers again once the replacement page connects", async () => {
     const hub = new BridgeHub();
     const first = fakePage();
-    hub.handleEvents(first.request, first.response);
+    first.attach(hub);
     first.close();
 
     const second = fakePage();
-    hub.handleEvents(second.request, second.response);
+    second.attach(hub);
 
     const pending = hub.query({ kind: "list_scene_provenance" });
     hub.handleReply({
-      requestId: second.lastQuery().requestId,
+      requestId: second.lastQuery()!.requestId,
       result: { status: "ready" },
     });
 
@@ -102,8 +88,8 @@ describe("BridgeHub lifecycle", () => {
     const hub = new BridgeHub();
     const a = fakePage("http://localhost:5173/");
     const b = fakePage("http://localhost:5173/other");
-    hub.handleEvents(a.request, a.response);
-    hub.handleEvents(b.request, b.response);
+    a.attach(hub);
+    b.attach(hub);
 
     const outcome = await hub.query({ kind: "list_scene_provenance" });
 
@@ -118,11 +104,11 @@ describe("BridgeHub lifecycle", () => {
     const hub = new BridgeHub();
     const a = fakePage();
     const b = fakePage();
-    hub.handleEvents(a.request, a.response);
-    hub.handleEvents(b.request, b.response);
+    a.attach(hub);
+    b.attach(hub);
 
     const pending = hub.query({ kind: "list_scene_provenance" }, { pageId: 2 });
-    hub.handleReply({ requestId: b.lastQuery().requestId, result: "from b" });
+    hub.handleReply({ requestId: b.lastQuery()!.requestId, result: "from b" });
 
     expect(await pending).toEqual({
       status: "answered",
@@ -134,7 +120,7 @@ describe("BridgeHub lifecycle", () => {
   it("reports a named page that has gone as disconnected", async () => {
     const hub = new BridgeHub();
     const page = fakePage();
-    hub.handleEvents(page.request, page.response);
+    page.attach(hub);
 
     expect(await hub.query({ kind: "list_scene_provenance" }, { pageId: 99 })).toEqual(
       { status: "disconnected" }
@@ -146,7 +132,7 @@ describe("BridgeHub lifecycle", () => {
   it("distinguishes a silent page from an absent one", async () => {
     const hub = new BridgeHub();
     const page = fakePage();
-    hub.handleEvents(page.request, page.response);
+    page.attach(hub);
 
     const outcome = await hub.query(
       { kind: "list_scene_provenance" },
@@ -159,7 +145,7 @@ describe("BridgeHub lifecycle", () => {
   it("drops a reply that arrives after its question timed out", async () => {
     const hub = new BridgeHub();
     const page = fakePage();
-    hub.handleEvents(page.request, page.response);
+    page.attach(hub);
 
     const envelope = (async () => {
       await hub.query({ kind: "list_scene_provenance" }, { timeoutMs: 20 });
@@ -170,7 +156,7 @@ describe("BridgeHub lifecycle", () => {
 
     // The page did nothing wrong, so this is accepted and ignored rather than
     // treated as an error.
-    expect(hub.handleReply({ requestId: late.requestId, result: {} })).toBe(true);
+    expect(hub.handleReply({ requestId: late!.requestId, result: {} })).toBe(true);
   });
 
   it("ignores a reply with no request id", () => {
@@ -180,7 +166,7 @@ describe("BridgeHub lifecycle", () => {
   it("releases every waiting query on dispose", async () => {
     const hub = new BridgeHub();
     const page = fakePage();
-    hub.handleEvents(page.request, page.response);
+    page.attach(hub);
 
     const pending = hub.query({ kind: "list_scene_provenance" });
     hub.dispose();
@@ -191,53 +177,29 @@ describe("BridgeHub lifecycle", () => {
 });
 
 describe("BridgeHub page identity", () => {
-  /** A page whose events request carries a session id, as the client sends. */
-  function sessionPage(session: string, url = "http://localhost:5173/") {
-    const page = fakePage(url);
-    (page.request as { url?: string }).url = `/__cts/bridge/events?session=${session}`;
-    return page;
-  }
+  const sessionPage = (session: string) => fakePage("http://localhost:5173/", session);
 
-  // StrictMode mounts the effect twice, and the first socket's close is not
-  // always visible to the server before the second opens. Observed live as one
-  // tab reported as two pages, which made every query ambiguous.
-  it("counts one document as one page when it opens two streams", async () => {
+  // The old socket's close is not always visible to the server before the new
+  // hello arrives. Observed live as one tab reported as two pages, which made
+  // every query ambiguous.
+  it("counts one document as one page when it connects twice", async () => {
     const hub = new BridgeHub();
     const first = sessionPage("s1");
     const second = sessionPage("s1");
 
-    hub.handleEvents(first.request, first.response);
-    hub.handleEvents(second.request, second.response);
+    first.attach(hub);
+    second.attach(hub);
 
     expect(hub.pageCount()).toBe(1);
 
     const pending = hub.query({ kind: "list_scene_provenance" });
 
-    // the surviving stream is the newer one
+    // the surviving connection is the newer one
     expect(second.lastQuery()).not.toBeNull();
     expect(first.lastQuery()).toBeNull();
 
-    hub.handleReply({ requestId: second.lastQuery().requestId, result: "ok" });
+    hub.handleReply({ requestId: second.lastQuery()!.requestId, result: "ok" });
     expect((await pending).status).toBe("answered");
-  });
-
-  // Ending the superseded stream reads to EventSource as a dropped connection,
-  // so the browser reconnects and the reconnect supersedes its own
-  // replacement. Live, page ids climbed without pause and every query landed
-  // in the gap as `disconnected`.
-  it("does not close the superseded stream, which would make the page reconnect", () => {
-    const hub = new BridgeHub();
-    const first = sessionPage("s1");
-    let ended = false;
-    (first.response as unknown as { end: () => void }).end = () => {
-      ended = true;
-    };
-    hub.handleEvents(first.request, first.response);
-
-    const second = sessionPage("s1");
-    hub.handleEvents(second.request, second.response);
-
-    expect(ended).toBe(false);
   });
 
   it("keeps two real tabs distinct", async () => {
@@ -245,8 +207,8 @@ describe("BridgeHub page identity", () => {
     const a = sessionPage("s1");
     const b = sessionPage("s2");
 
-    hub.handleEvents(a.request, a.response);
-    hub.handleEvents(b.request, b.response);
+    a.attach(hub);
+    b.attach(hub);
 
     expect(hub.pageCount()).toBe(2);
     expect((await hub.query({ kind: "list_scene_provenance" })).status).toBe(
@@ -261,20 +223,14 @@ describe("BridgeHub page identity", () => {
     const a = fakePage();
     const b = fakePage();
 
-    hub.handleEvents(a.request, a.response);
-    hub.handleEvents(b.request, b.response);
+    a.attach(hub);
+    b.attach(hub);
 
     expect(hub.pageCount()).toBe(2);
   });
 });
 
-describe("BridgeHub pages on other channels", () => {
-  function sessionPage(session: string) {
-    const page = fakePage();
-    (page.request as { url?: string }).url = `/__cts/bridge/events?session=${session}`;
-    return page;
-  }
-
+describe("BridgeHub connections", () => {
   function channelPage() {
     const sent: Array<{ requestId: string }> = [];
     return { channel: { send: (envelope: { requestId: string }) => sent.push(envelope) }, sent };
@@ -307,20 +263,10 @@ describe("BridgeHub pages on other channels", () => {
     expect(hub.pageCount()).toBe(1);
   });
 
-  // A tab with both the legacy component and the injected inspector has one
-  // session and two transports. Counted twice, every query would be ambiguous.
-  it("counts one document on two transports as one page", () => {
-    const hub = new BridgeHub();
-    const legacy = sessionPage("same-tab");
-    hub.handleEvents(legacy.request, legacy.response);
-    hub.attach(channelPage().channel, { key: "socket-1", session: "same-tab" });
-
-    expect(hub.pageCount()).toBe(1);
-  });
 });
 
 describe("BridgeHub.broadcast", () => {
-  it("tells every attached page, on a transport that can be told", () => {
+  it("tells every attached page that can be told", () => {
     const hub = new BridgeHub();
     const told: string[] = [];
 
@@ -332,7 +278,7 @@ describe("BridgeHub.broadcast", () => {
       { send: () => undefined, emit: (event) => told.push(`b:${event}`) },
       { key: {}, session: "b" }
     );
-    // The old transport, which only answers questions.
+    // Only answers questions.
     hub.attach({ send: () => undefined }, { key: {}, session: "c" });
 
     hub.broadcast("news", {});

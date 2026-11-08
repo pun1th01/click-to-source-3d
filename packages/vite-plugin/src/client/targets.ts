@@ -3,11 +3,23 @@ import type {
   ObjectRef,
   PointedObject,
   ProvenanceAddress,
+  SourceFunction,
   SourceStamp,
 } from "@click-to-source-3d/shared";
 import { getInstanceRecord, resolveSourceRef } from "@click-to-source-3d/core";
-import { describeMesh, measureObject, type Pick } from "@click-to-source-3d/core/devtools";
+import {
+  describeMesh,
+  generatorsOf,
+  measureObject,
+  partsOf,
+  recordOf,
+  stampOf,
+  type ObjectPart,
+  type Pick,
+} from "@click-to-source-3d/core/devtools";
 import type { Discovery, View } from "./discovery.js";
+
+export { stampOf };
 
 /** An object the inspector is holding on to: selected, pointed at, or pinned. */
 export type Target = { view: View; pick: Pick };
@@ -19,15 +31,13 @@ export type Address = {
   column?: number;
   ordinal: number;
   instanceId: number | null;
+  /** For a part of what is at that source, such as a node of a loaded model. */
+  path?: number[];
 };
 
 export function kindOf(object: THREE.Object3D): string {
   // three gives InstancedMesh no type string of its own.
   return (object as THREE.InstancedMesh).isInstancedMesh ? "InstancedMesh" : object.type;
-}
-
-export function stampOf(object: THREE.Object3D | undefined): SourceStamp | undefined {
-  return object?.userData?.__ctsSource as SourceStamp | undefined;
 }
 
 function sameSite(a: SourceStamp, b: { file: string; line: number; column?: number }): boolean {
@@ -80,18 +90,35 @@ export function addressOf(target: Target): Address | null {
     }
   });
 
-  return found < 0
-    ? null
-    : {
-        file: stamp.file,
-        line: stamp.line,
-        column: stamp.column,
-        ordinal: found,
-        instanceId: target.pick.instanceId,
-      };
+  if (found < 0) {
+    return null;
+  }
+
+  const path: number[] = [];
+  for (let current = target.pick.object; current !== resolved && current.parent; current = current.parent) {
+    path.unshift(current.parent.children.indexOf(current));
+  }
+
+  return {
+    file: stamp.file,
+    line: stamp.line,
+    column: stamp.column,
+    ordinal: found,
+    instanceId: target.pick.instanceId,
+    ...(path.length > 0 ? { path } : {}),
+  };
 }
 
 export function findAddress(discovery: Discovery, address: Address): Target | null {
+  // By column first, then without: rewriting a value can move what follows it on
+  // the same line, and that shouldn't lose the object.
+  return (
+    searchAddress(discovery, address) ??
+    (address.column !== undefined ? searchAddress(discovery, { ...address, column: undefined }) : null)
+  );
+}
+
+function searchAddress(discovery: Discovery, address: Address): Target | null {
   for (const view of discovery.all()) {
     const scene = view.scene();
     if (!scene) {
@@ -109,7 +136,11 @@ export function findAddress(discovery: Discovery, address: Address): Target | nu
       }
     });
     if (match) {
-      return targetFor(view, match, address.instanceId);
+      let object: THREE.Object3D = match;
+      for (const index of address.path ?? []) {
+        object = object.children[index] ?? object;
+      }
+      return targetFor(view, object, address.instanceId);
     }
   }
   return null;
@@ -204,6 +235,55 @@ function transformOf(target: Target): PointedObject["transform"] {
   };
 }
 
+/** A stamp behind a target, and whether changing the live object can preview its values. */
+export type TargetPart = ObjectPart & { live: boolean };
+
+/**
+ * Every stamp behind a target. What is at its source first, and then, for a part
+ * of something, what is known about that part alone.
+ */
+export function partsOfTarget(target: Target): TargetPart[] {
+  const { object, resolution } = target.pick;
+  const resolved = resolution?.object;
+  const seen = new Set<SourceStamp>();
+  const parts: TargetPart[] = [];
+
+  for (const [owner, live] of [[resolved, true], [object, false]] as const) {
+    for (const part of owner ? partsOf(owner) : []) {
+      if (!seen.has(part.stamp)) {
+        seen.add(part.stamp);
+        parts.push({ ...part, live });
+      }
+    }
+  }
+  return parts;
+}
+
+/** The functions behind a target, without repeats. */
+export function generatorsOfTarget(target: Target): SourceFunction[] {
+  const { object, resolution } = target.pick;
+  const seen = new Set<string>();
+  return [...(resolution ? generatorsOf(resolution.object) : []), ...generatorsOf(object)].filter((fn) => {
+    const fresh = !seen.has(fn.id);
+    seen.add(fn.id);
+    return fresh;
+  });
+}
+
+/** Where a target sits inside what its source made: `beacon › left blade`. */
+export function modelPathOf(target: Target): string | null {
+  const { object, resolution } = target.pick;
+  const resolved = resolution?.object;
+  if (!resolved || resolved === object) {
+    return null;
+  }
+  const names: string[] = [];
+  for (let current: THREE.Object3D | null = object; current && current !== resolved; current = current.parent) {
+    names.unshift(current.name || kindOf(current));
+  }
+  return names.join(" › ");
+}
+
 /**
  * A target as plain data: what an assistant reads through `get_selection`, and
  * what a bug report and a comparison are written from.
@@ -228,12 +308,18 @@ export function describeTarget(target: Target): PointedObject {
       : null,
     address: provenanceAddress(target),
     parents: ref ? [] : parentsOf(object),
-    props: stamp?.props ?? [],
+    props: partsOfTarget(target).flatMap((part) =>
+      (part.stamp.props ?? []).map((prop) => ({ ...prop, file: part.stamp.file }))
+    ),
     transform: transformOf(target),
     materials: (details?.materials ?? []).map((material) =>
       material.color ? `${material.type} ${material.color}` : material.type
     ),
     cost: measureObject(object),
+    trace: recordOf(resolution?.object)?.trace ?? [],
+    generators: generatorsOfTarget(target),
+    how: stamp?.how ?? null,
+    modelPath: modelPathOf(target),
   };
 }
 

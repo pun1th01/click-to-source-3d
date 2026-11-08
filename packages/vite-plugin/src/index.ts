@@ -1,4 +1,4 @@
-export { clickToSource } from "./plugin.js";
+export { clickToSource, withClickToSource } from "./plugin.js";
 export type { ClickToSourceOptions } from "./plugin.js";
 export { DEFAULT_ALLOWED_EXTENSIONS } from "./middleware.js";
 export { editSource, SourceEditError } from "./sourceEditor.js";

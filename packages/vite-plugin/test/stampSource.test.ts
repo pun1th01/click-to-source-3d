@@ -233,6 +233,13 @@ describe("stampSource", () => {
     expect(out.startsWith('"use client"; const __ctsStamps = [')).toBe(true);
   });
 
+  // Written as a person might, with nothing after it to end the statement.
+  it("keeps a directive with no semicolon a statement of its own", () => {
+    const out = stamp('"use client"\nconst A = () => <mesh />;');
+
+    expect(out.startsWith('"use client"; const __ctsStamps = [')).toBe(true);
+  });
+
   it("names the table so it collides with nothing in the module", () => {
     const out = stamp("const __ctsStamps = 1; const A = () => <mesh />;");
 

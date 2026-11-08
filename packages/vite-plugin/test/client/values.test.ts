@@ -13,6 +13,26 @@ describe("draftOf", () => {
   });
 });
 
+describe("parseDraft for colours", () => {
+  const hex = { raw: "0x88aa55", value: 0x88aa55, editable: true };
+  const css = { raw: '"#88aa55"', value: "#88aa55", editable: true };
+
+  it("takes a colour typed with # for one written as a number", () => {
+    expect(parseDraft(hex, "#ff0000")).toEqual({ ok: true, value: 0xff0000 });
+    expect(parseDraft(hex, "#f00")).toEqual({ ok: true, value: 0xff0000 });
+  });
+
+  it("takes one typed as a number for one written as a string", () => {
+    expect(parseDraft(css, "0xff0000")).toEqual({ ok: true, value: "#ff0000" });
+    expect(parseDraft(css, "0x0000ff")).toEqual({ ok: true, value: "#0000ff" });
+  });
+
+  it("leaves numbers that aren't colours as numbers", () => {
+    expect(parseDraft({ raw: "16", value: 16, editable: true }, "#ff0000")).toMatchObject({ ok: false });
+    expect(parseDraft({ raw: '"hello"', value: "hello", editable: true }, "0xff0000")).toEqual({ ok: true, value: "0xff0000" });
+  });
+});
+
 describe("parseDraft", () => {
   const number = { raw: "1", value: 1, editable: true };
 

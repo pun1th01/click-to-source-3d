@@ -47,7 +47,91 @@ const box: PointedObject = {
     textureBytes: 0,
     castsShadow: false,
   },
+  trace: [],
+  generators: [],
+  how: null,
+  modelPath: null,
 };
+
+describe("reportMarkdown for plain three.js", () => {
+  const terrain: PointedObject = {
+    ...box,
+    props: [
+      {
+        element: "PlaneGeometry",
+        name: "args",
+        array: true,
+        values: [{ raw: "96", value: 96, editable: true, line: 31, column: 40 }],
+      },
+    ],
+    trace: [
+      {
+        name: "buildWorld",
+        file: "src/world.js",
+        line: 8,
+        args: [{ name: "seed", value: "7" }],
+        calledAt: { file: "src/main.js", line: 23 },
+      },
+      {
+        name: "createTerrain",
+        file: "src/world.js",
+        line: 30,
+        args: [{ name: "size", value: "40" }],
+        calledAt: { file: "src/world.js", line: 9 },
+      },
+    ],
+    generators: [
+      {
+        id: "src/world.js#createTerrain",
+        name: "createTerrain",
+        file: "src/world.js",
+        line: 30,
+        params: [],
+        numbers: [],
+        uses: [
+          { name: "fbm", depth: 0, file: "src/noise.js", line: 21 },
+          { name: "hash", depth: 1, file: "src/noise.js", line: 1 },
+          { name: "createNoise2D", depth: 0, package: "simplex-noise" },
+        ],
+      },
+    ],
+    modelPath: "beacon › left blade",
+  };
+  const report = () => reportMarkdown(terrain, context);
+
+  it("lists the calls that led to the object, nearest first", () => {
+    const text = report();
+    expect(text).toContain("`createTerrain(size = 40)` at `src/world.js:9`");
+    expect(text).toContain("`buildWorld(seed = 7)` at `src/main.js:23`");
+    expect(text.indexOf("createTerrain(size")).toBeLessThan(text.indexOf("buildWorld(seed"));
+  });
+
+  it("lists the helpers, nested as they call each other", () => {
+    const text = report();
+    expect(text).toContain("- `fbm` (src/noise.js:21)");
+    expect(text).toContain("  - `hash` (src/noise.js:1)");
+    expect(text).toContain("- `createNoise2D` (simplex-noise)");
+  });
+
+  // Its own function and its geometry's can both use it.
+  it("lists a helper once, however many functions behind the object use it", () => {
+    const twice = {
+      ...terrain,
+      generators: [terrain.generators[0], { ...terrain.generators[0], id: "src/world.js#other", name: "other" }],
+    };
+    const text = reportMarkdown(twice, context);
+
+    expect(text.match(/\`fbm\`/g)).toHaveLength(1);
+  });
+
+  it("names plain classes without JSX's brackets", () => {
+    expect(report()).toContain("`PlaneGeometry` args:");
+  });
+
+  it("says which part of a model it is", () => {
+    expect(report()).toContain("`beacon › left blade`");
+  });
+});
 
 describe("reportMarkdown", () => {
   const report = reportMarkdown(box, context);

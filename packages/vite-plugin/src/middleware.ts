@@ -33,6 +33,8 @@ export const DEFAULT_ALLOWED_EXTENSIONS = [
   ".cjs",
   ".mts",
   ".cts",
+  // For a script written in a page. Only a literal's text is ever rewritten.
+  ".html",
 ] as const;
 
 export type FileRequestOptions = {
@@ -492,6 +494,87 @@ export async function handleOpenRequest(
  * Deliberately free of any Vite import: it takes only node:http types, so a
  * binding for another dev server can reuse it without change.
  */
+/** More than a person could change at once. */
+const MAX_EDITS = 256;
+
+/** Last in the file first, so a change of length never moves one still to be made. */
+function lastFirst(a: EditRequest, b: EditRequest): number {
+  return b.line - a.line || (b.column ?? 0) - (a.column ?? 0);
+}
+
+/**
+ * Several edits at once, across any number of files, all of them or none.
+ *
+ * Everything is checked and worked out before the first write. A file written
+ * while a later edit could still be refused would leave half of a save on disk.
+ */
+async function handleManyEdits(
+  response: ServerResponse,
+  root: string,
+  body: Record<string, unknown>,
+  options: FileRequestOptions
+): Promise<void> {
+  const list = body.edits as unknown[];
+  let parsed: EditWriteFileRequest[];
+
+  try {
+    if (list.length === 0 || list.length > MAX_EDITS) {
+      throw new Error("invalid request body");
+    }
+    parsed = list.map((entry) => parseRequestBody(entry, "write") as EditWriteFileRequest);
+  } catch {
+    sendJson(response, 400, { error: "Invalid request body" });
+    return;
+  }
+
+  const files = new Map<string, EditRequest[]>();
+  for (const { file, edit } of parsed) {
+    files.set(file, [...(files.get(file) ?? []), edit]);
+  }
+
+  const writes: Array<{ filePath: string; content: string }> = [];
+
+  try {
+    for (const [file, edits] of files) {
+      const filePath = await resolveSafePath(root, file, [root, ...(options.allowedRoots ?? [])]);
+      if (!filePath) {
+        sendJson(response, 400, { error: "Invalid file path" });
+        return;
+      }
+      if (!isEditableFile(file, options.allowedExtensions)) {
+        sendJson(response, 400, { error: "File type not editable" });
+        return;
+      }
+
+      let content = await fs.readFile(filePath, "utf8");
+      for (const edit of [...edits].sort(lastFirst)) {
+        content = editSource(content, edit);
+      }
+      writes.push({ filePath, content });
+    }
+  } catch (error) {
+    if (error instanceof SourceEditError) {
+      sendJson(response, 400, { error: error.message, code: error.code });
+      return;
+    }
+    if ((error as FileSystemError).code === "ENOENT") {
+      sendJson(response, 404, { error: "File not found" });
+      return;
+    }
+    sendJson(response, 500, { error: "Filesystem failure" });
+    return;
+  }
+
+  try {
+    for (const { filePath, content } of writes) {
+      await writeAtomically(filePath, content);
+    }
+    sendJson(response, 200, { success: true });
+  } catch {
+    sendJson(response, 500, { error: "Filesystem failure" });
+  }
+}
+
 export async function handleFileRequest(
   request: IncomingMessage,
   response: ServerResponse,
@@ -515,7 +598,12 @@ export async function handleFileRequest(
   let parsedRequest: FileRequest;
 
   try {
-    parsedRequest = parseRequestBody(await readJsonBody(request), operation);
+    const body = await readJsonBody(request);
+    if (operation === "write" && isRecord(body) && Array.isArray(body.edits)) {
+      await handleManyEdits(response, root, body, options);
+      return;
+    }
+    parsedRequest = parseRequestBody(body, operation);
   } catch {
     sendJson(response, 400, { error: "Invalid request body" });
     return;

@@ -2,12 +2,11 @@ import {
   AGENT_REPORT_PATH,
   AGENT_SELECTION_EVENT,
   AGENT_STATE_EVENT,
-  BRIDGE_EVENTS_PATH,
   BRIDGE_HELLO_EVENT,
   BRIDGE_QUERY_EVENT,
   BRIDGE_QUERY_PATH,
   BRIDGE_REPLY_EVENT,
-  BRIDGE_REPLY_PATH,
+  MCP_SETUP_PATH,
   OPEN_IN_EDITOR_PATH,
   READ_FILE_PATH,
   WRITE_FILE_PATH,
@@ -15,13 +14,14 @@ import {
 import type { BridgeQuery } from "@click-to-source-3d/shared";
 import launchEditor from "launch-editor";
 import { existsSync, readFileSync } from "node:fs";
+import { readFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { AgentHub } from "./agentHub.js";
 import { BridgeHub } from "./bridgeHub.js";
 import type { IncomingMessage, ServerResponse } from "node:http";
-import type { Plugin, ResolvedConfig } from "vite";
+import type { Plugin, ResolvedConfig, UserConfig, UserConfigExport } from "vite";
 import {
   checkCaller,
   isLoopbackAddress,
@@ -30,10 +30,42 @@ import {
   handleOpenRequest,
   type FileRequestOptions,
 } from "./middleware.js";
+import { mcpSetupStatus, turnOnMcp } from "./mcpSetup.js";
 import { announceDevServer } from "./registry.js";
-import { stampSource } from "./stampSource.js";
+import { relativeFile, stampSource } from "./stampSource.js";
+import { parseSource } from "./trace/facts.js";
+import { isThreeBuild, MAX_MODULE_SIZE, ProjectIndex } from "./trace/project.js";
 
 const TRAILING_SLASHES = new RegExp("/+$");
+
+const SCRIPT_FILE = /\.[cm]?[jt]sx?$/;
+const JSX_FILE = /\.[jt]sx$/;
+const DECLARATION_FILE = /\.d\.[cm]?ts$/;
+
+/**
+ * Modules that are not part of the page, or not code at all. A worker has no
+ * scene to inspect, and the rest are served as text or as a URL.
+ */
+const SKIPPED_QUERY = /(^|&)(worker|sharedworker|worker_file|raw|url|inline|html-proxy)(&|=|$)/;
+
+/** A `<script type="module">` written in a page, as Vite serves it. */
+const PAGE_SCRIPT = /\.html?\?html-proxy&index=\d+\.js$/;
+
+/** `<script src="...">` with no `type="module"`. */
+const CLASSIC_SCRIPT = /<script\b(?![^>]*\btype=["']?module)[^>]*\bsrc=["']?([^"'\s>]+)/gi;
+
+/**
+ * Hands over renderers made before the inspector has loaded. A classic script runs
+ * ahead of every module script, and with no hook there for three to find, it would
+ * announce its renderer to nobody.
+ */
+const EARLY_HOOK = `(function(){var h=window.__THREE_DEVTOOLS__||(window.__THREE_DEVTOOLS__=new EventTarget()),e=window.__CTS_EARLY_RENDERERS__=[];h.addEventListener("observe",function(v){var d=v.detail;if(d&&(d.isWebGLRenderer||d.isRenderer))e.push(d)})})();`;
+
+/**
+ * Anything in a module that could matter to the record of where objects come
+ * from. A file with none of this can't make an object, or call what does.
+ */
+const MAY_NEED_TRACING = /\bnew\s+[\w$.]|\.clone\s*\(|\.(load|parse)(Async)?\s*\(|\bimport\b/;
 
 /** Reads a JSON body, runs a handler, and writes the JSON result. */
 async function handleBridgePost(
@@ -79,9 +111,11 @@ export type ClickToSourceOptions = {
    */
   allowedOrigins?: string[];
   /**
-   * Stamp every host element with its source location into
-   * `userData.__ctsSource`, so file, function and line no longer have to be
-   * hand-written into `userData.sourceRef`.
+   * Record where every three.js object comes from, so file, function and line
+   * never have to be written by hand. In JSX, each host element is stamped into
+   * `userData.__ctsSource`. In plain code, on its way to a browser from the dev
+   * server, calls are added around what makes objects, and the records are kept
+   * apart from the objects; `false` turns off everything that touches your code.
    *
    * Emitted paths are always relative to the Vite root, in dev as well as in
    * a build. The panel displays whatever it resolves, so an absolute path
@@ -105,18 +139,6 @@ export type ClickToSourceOptions = {
    */
   stampSource?: boolean | "always";
   /**
-   * Formerly installed a probe that captured per-instance transforms as they
-   * were written.
-   *
-   * Instance transforms are now read live from the mesh when an instance is
-   * resolved, which needs no probe, patches nothing, and also covers the
-   * `setMatrixAt(i, dummy.matrix)` loop the probe could not see. Every
-   * InstancedMesh gets per-instance provenance with no option set.
-   *
-   * @deprecated Has no effect. Remove it; the option is removed in 0.2.0.
-   */
-  captureInstances?: boolean;
-  /**
    * Serve the read, write and bridge endpoints to callers beyond this
    * machine.
    *
@@ -133,7 +155,6 @@ export type ClickToSourceOptions = {
    *
    * On by default, dev only. The injected inspector answers over Vite's own
    * HMR websocket, which is already open, so an idle bridge costs nothing.
-   * `<ClickToSourceBridge />` still works and is no longer needed.
    */
   bridge?: boolean;
   /**
@@ -217,6 +238,16 @@ export function clickToSource(options: ClickToSourceOptions = {}): Plugin {
   const agents = new AgentHub((event, data) => hub.broadcast(event, data));
   let warnedAboutOrder = false;
 
+  /** Set by each transform: resolving needs a context from Vite, and any of them will do. */
+  let resolveImport: (source: string, importer: string) => Promise<string | null> = async () => null;
+  const project = new ProjectIndex({
+    resolve: (source, importer) => resolveImport(source, importer),
+    read: (file) => readFile(file, "utf8").catch(() => null),
+    relative: (file) => relativeFile(resolvedConfig.root, file.split("?")[0]),
+  });
+  /** Files a page loads as a classic script, where an `import` would be a syntax error. */
+  const classicScripts = new Set<string>();
+
   return {
     name: "click-to-source",
     // "pre" so the transform runs before Vite's own JSX compilation, which is
@@ -250,28 +281,48 @@ export function clickToSource(options: ClickToSourceOptions = {}): Plugin {
     },
     configResolved(config) {
       resolvedConfig = config;
-
-      if (options.captureInstances !== undefined) {
-        config.logger.warn(
-          "click-to-source: captureInstances is deprecated and has no effect. " +
-            "Instance transforms are now read live, for every InstancedMesh, " +
-            "with no option. Remove it from clickToSource()."
-        );
-      }
     },
-    transform(code, id) {
+    transform(code, id, transformOptions) {
       if (!stamping) {
         return null;
       }
-      if (resolvedConfig.command === "build" && stamping !== "always") {
+      const isBuild = resolvedConfig.command === "build";
+      if (isBuild && stamping !== "always") {
         return null;
       }
-      if (!/\.[jt]sx$/.test(id.split("?")[0])) {
-        return null;
-      }
-      // A dependency's JSX is the dependency's: its paths would be outside
+
+      const [file, query] = id.split("?");
+
+      // A dependency's code is the dependency's: its paths would be outside
       // the project and its values nothing a developer edits.
-      if (id.includes("/node_modules/")) {
+      if (id.startsWith("\0") || id.includes("/node_modules/")) {
+        return null;
+      }
+      const isPageScript = PAGE_SCRIPT.test(id);
+      if (!isPageScript) {
+        if (!SCRIPT_FILE.test(file) || DECLARATION_FILE.test(file)) {
+          return null;
+        }
+        if (query && SKIPPED_QUERY.test(query)) {
+          return null;
+        }
+      }
+
+      // Plain three.js code is only ever recorded on its way to a browser, with
+      // the inspector there to read the record. Not a build, not a server render,
+      // and not a test runner, which also serves modules through Vite.
+      // Vite 6 and later say where a module is going through its environment, and
+      // may stop passing `ssr` one day.
+      const environment = (this as { environment?: { config?: { consumer?: string } } }).environment;
+      const forServer = transformOptions?.ssr === true || environment?.config?.consumer === "server";
+      const tracing =
+        !isBuild &&
+        injecting &&
+        !forServer &&
+        resolvedConfig.mode !== "test" &&
+        !classicScripts.has(file);
+      const isJsx = JSX_FILE.test(file);
+      if (!isJsx && !tracing) {
         return null;
       }
 
@@ -282,7 +333,7 @@ export function clickToSource(options: ClickToSourceOptions = {}): Plugin {
         return null;
       }
 
-      if (!warnedAboutOrder && !code.includes("<")) {
+      if (isJsx && !warnedAboutOrder && !code.includes("<")) {
         // A .jsx file with no JSX left in it means something compiled it
         // first. @vitejs/plugin-react does not — Vite's own compilation runs
         // after this transform — but a plugin that compiles JSX itself in a
@@ -296,25 +347,88 @@ export function clickToSource(options: ClickToSourceOptions = {}): Plugin {
             "clickToSource() first in your Vite plugins, or source stamping " +
             "will do nothing."
         );
+        if (!tracing) {
+          return null;
+        }
+      }
+
+      const root = resolvedConfig.root;
+
+      // Too big to be something being worked on, or a copy of three.js itself,
+      // which is full of `new` and has no business being recorded.
+      if (
+        !tracing ||
+        !MAY_NEED_TRACING.test(code) ||
+        code.length > MAX_MODULE_SIZE ||
+        isThreeBuild(file, code)
+      ) {
+        return isJsx ? stampSource(code, file, { root }) : null;
+      }
+
+      resolveImport = async (source, importer) =>
+        (await this.resolve(source, importer, { skipSelf: true }))?.id ?? null;
+
+      if (isPageScript) {
+        // Vite hands over the script alone. Its lines are the page's lines, so what
+        // is recorded has to say where in the page it is.
+        return readFile(file, "utf8")
+          .catch(() => "")
+          // An HTML parser reads every line ending as \n, so that is what the script it
+          // hands over has, whatever the file on disk does. Lines and columns don't change.
+          .then((page) => page.replace(/\r\n?/g, "\n"))
+          .then(async (page) => {
+            const at = page.indexOf(code);
+            if (at < 0) {
+              return null;
+            }
+            const before = page.slice(0, at);
+            const startLine = before.split("\n").length;
+            const startColumn = at - (before.lastIndexOf("\n") + 1);
+            const inPage = parseSource(code, file, { startLine, startColumn });
+            if (!inPage) {
+              return null;
+            }
+            const plan = await project.plan(id, code, inPage, startLine);
+            return stampSource(code, file, { root, trace: { program: inPage, plan, client: CLIENT_MODULE_ID } });
+          });
+      }
+
+      const program = parseSource(code, file);
+      if (!program) {
         return null;
       }
 
-      return stampSource(code, id.split("?")[0], { root: resolvedConfig.root });
+      return project.plan(file, code, program).then((plan) =>
+        stampSource(code, file, { root, trace: { program, plan, client: CLIENT_MODULE_ID } })
+      );
     },
 
     transformIndexHtml: {
       order: "pre",
-      handler(_html, context) {
+      handler(html, context) {
         // Dev only. In a build there is no dev server to answer the inspector
         // or the bridge, and nothing should reach a visitor.
         if (!context.server || !injecting) {
           return;
         }
 
+        const folder = path.posix.dirname(context.path);
+        let hasClassicScript = false;
+        for (const [, src] of html.matchAll(CLASSIC_SCRIPT)) {
+          if (!/^(https?:)?\/\//.test(src)) {
+            const from = src.startsWith("/") ? src : path.posix.join(folder, src);
+            classicScripts.add(path.join(resolvedConfig.root, from.split("?")[0]).split(path.sep).join("/"));
+          }
+          hasClassicScript = true;
+        }
+
         // A module script at the very top of <head>. Module scripts run in
         // document order, so the inspector is listening on three's devtools
         // hook before the application constructs its first renderer.
         return [
+          ...(hasClassicScript
+            ? [{ tag: "script", children: EARLY_HOOK, injectTo: "head-prepend" as const }]
+            : []),
           {
             tag: "script",
             attrs: { type: "module", src: `/@id/__x00__${CLIENT_MODULE_ID}` },
@@ -382,6 +496,41 @@ export function clickToSource(options: ClickToSourceOptions = {}): Plugin {
     },
 
     configureServer(server) {
+      // A module's record says things about what it calls in other files: where
+      // a helper is, and whether a function makes objects at all. Vite only
+      // transforms again what changed, so what depends on a changed file is
+      // marked to be transformed again the next time it is asked for.
+      const normalize = (file: string) => file.split(path.sep).join("/");
+      server.watcher.on("change", (changed: string) => {
+        const file = normalize(changed);
+        project.invalidate(file);
+
+        const graph = server.moduleGraph;
+        const seen = new Set<object>();
+        const visit = (node: { importers: Set<never> }) => {
+          for (const importer of node.importers) {
+            if (!seen.has(importer)) {
+              seen.add(importer);
+              graph.invalidateModule(importer);
+              visit(importer);
+            }
+          }
+        };
+        for (const node of graph.getModulesByFile(file) ?? []) {
+          visit(node as unknown as { importers: Set<never> });
+        }
+      });
+      // Code only. Saving a value makes a temporary file appear and go, and that
+      // shouldn't throw away everything known about how the project's imports resolve.
+      const fileListChanged = (changed: string) => {
+        if (SCRIPT_FILE.test(changed)) {
+          project.invalidate(normalize(changed));
+          project.forgetResolutions();
+        }
+      };
+      server.watcher.on("add", fileListChanged);
+      server.watcher.on("unlink", fileListChanged);
+
       // Announce the server once it is listening, so the MCP server can find
       // it without being configured. Its address is known only then:
       // resolvedUrls is null at the httpServer "listening" event and is
@@ -514,12 +663,7 @@ export function clickToSource(options: ClickToSourceOptions = {}): Plugin {
         // hand to any page that happens to be open — or, under `vite --host`,
         // to the network. Checked before `bridging` is consulted, so a
         // disallowed caller cannot even learn whether the bridge is enabled.
-        if (
-          pathname === BRIDGE_EVENTS_PATH ||
-          pathname === BRIDGE_REPLY_PATH ||
-          pathname === BRIDGE_QUERY_PATH ||
-          pathname === AGENT_REPORT_PATH
-        ) {
+        if (pathname === BRIDGE_QUERY_PATH || pathname === AGENT_REPORT_PATH || pathname === MCP_SETUP_PATH) {
           const refusal = checkCaller(request, {
             allowedOrigins: serverOrigins(),
             allowRemote: requestOptions.allowRemote,
@@ -533,16 +677,28 @@ export function clickToSource(options: ClickToSourceOptions = {}): Plugin {
           }
         }
 
-        if (bridging && pathname === BRIDGE_EVENTS_PATH) {
-          hub.handleEvents(request, response);
-          return;
-        }
-
-        if (bridging && pathname === BRIDGE_REPLY_PATH) {
-          void handleBridgePost(request, response, (body) => {
-            hub.handleReply(body as { requestId?: string; result?: unknown });
-            return { ok: true };
-          });
+        // The Agent tab's button: registers the MCP server where the assistant reads
+        // its config. It writes only that entry, and only to those files.
+        if (pathname === MCP_SETUP_PATH) {
+          const send = (status: number, payload: unknown) => {
+            response.statusCode = status;
+            response.setHeader("Content-Type", "application/json; charset=utf-8");
+            response.end(JSON.stringify(payload));
+          };
+          if (!bridging) {
+            send(404, { error: "The scene bridge is off, so an assistant couldn't see the page anyway." });
+          } else if (request.method === "GET") {
+            send(200, mcpSetupStatus(resolvedConfig.root));
+          } else if (request.method === "POST") {
+            try {
+              send(200, turnOnMcp(resolvedConfig.root));
+            } catch (error) {
+              send(500, { error: `Could not write the config: ${(error as Error).message}` });
+            }
+          } else {
+            response.setHeader("Allow", "GET, POST");
+            send(405, { error: "Method not allowed" });
+          }
           return;
         }
 
@@ -631,4 +787,31 @@ export function clickToSource(options: ClickToSourceOptions = {}): Plugin {
       });
     },
   };
+}
+
+/**
+ * Adds the plugin to a Vite config of any shape, for a config whose plugin list
+ * can't be reached by adding to an array:
+ *
+ *   export default withClickToSource(defineConfig(({ mode }) => ({ ... })));
+ *
+ * Vite flattens nested plugin arrays and drops empty entries, so this needs to
+ * know nothing about what was already there.
+ */
+export function withClickToSource(
+  config: UserConfigExport = {},
+  options?: ClickToSourceOptions
+): UserConfigExport {
+  const add = (resolved: UserConfig): UserConfig => ({
+    ...resolved,
+    plugins: [clickToSource(options), ...(resolved.plugins ?? [])],
+  });
+
+  if (typeof config === "function") {
+    return (env) => {
+      const made = config(env);
+      return made instanceof Promise ? made.then(add) : add(made);
+    };
+  }
+  return config instanceof Promise ? config.then(add) : add(config);
 }

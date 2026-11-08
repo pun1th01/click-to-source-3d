@@ -1,4 +1,3 @@
-import type { IncomingMessage, ServerResponse } from "node:http";
 import type { BridgeQuery } from "@click-to-source-3d/shared";
 
 /**
@@ -18,16 +17,13 @@ import type { BridgeQuery } from "@click-to-source-3d/shared";
 export type BridgeEnvelope = { requestId: string; query: BridgeQuery };
 
 /**
- * How a question reaches one page: an EventSource stream for
- * `<ClickToSourceBridge />`, or Vite's HMR websocket for the injected
- * inspector. The hub only needs to be able to send.
+ * How a question reaches one page: Vite's HMR websocket, which the injected
+ * inspector is already connected to. The hub only needs to be able to send.
  */
 export type BridgeChannel = {
   send: (envelope: BridgeEnvelope) => void;
-  /** Tells the page something it did not ask. Only the websocket can. */
+  /** Tells the page something it did not ask. */
   emit?: (event: string, data: unknown) => void;
-  /** Ends the connection when the dev server shuts down, if the hub owns it. */
-  close?: () => void;
 };
 
 type Page = {
@@ -61,19 +57,10 @@ export class BridgeHub {
    * Registers a page, replacing any earlier registration of the same
    * document or the same connection.
    *
-   * One document is one page even when it connects twice. React StrictMode
-   * mounts effects twice in development, and the first stream's close is not
-   * always visible to the server before the second opens — observed live as a
-   * single tab reported as two pages, which made every query ambiguous. The
-   * session id is per document, so a page with the legacy component and the
-   * injected inspector, one on each transport, also counts once.
-   *
-   * The superseded entry is dropped from the map but its connection is left
-   * alone. Ending an EventSource stream would be tidier and is wrong: to the
-   * browser a stream that ends looks like a dropped connection, so it
-   * reconnects, and the reconnect supersedes its own replacement. Measured
-   * with that end() in place, page ids climbed without pause and every query
-   * landed in the gap as `disconnected`.
+   * One document is one page even when it connects twice: after a reconnect, the
+   * old socket's close is not always visible to the server before the new hello
+   * arrives, and a single tab reported as two pages would make every query
+   * ambiguous. The session id is per document, and the key per connection.
    */
   private register(page: Omit<Page, "id" | "connectedAt">): number {
     for (const [existingId, existing] of this.pages) {
@@ -90,43 +77,8 @@ export class BridgeHub {
     return id;
   }
 
-  /** Attaches a page's event stream. Returns when the page disconnects. */
-  handleEvents(request: IncomingMessage, response: ServerResponse): void {
-    const session = new URL(
-      request.url ?? "/",
-      "http://localhost"
-    ).searchParams.get("session");
-
-    response.writeHead(200, {
-      "Content-Type": "text/event-stream",
-      "Cache-Control": "no-cache",
-      Connection: "keep-alive",
-      // Vite sits behind no proxy in dev, but a stray buffering layer would
-      // hold events indefinitely and look exactly like a hung page.
-      "X-Accel-Buffering": "no",
-    });
-
-    const id = this.register({
-      channel: {
-        send: (envelope) => {
-          response.write(`data: ${JSON.stringify(envelope)}\n\n`);
-        },
-        close: () => response.end(),
-      },
-      url: request.headers.referer ?? "unknown",
-      session,
-      key: response,
-    });
-    response.write(`: connected ${id}\n\n`);
-
-    response.on("close", () => {
-      this.pages.delete(id);
-    });
-  }
-
   /**
-   * Attaches a page that speaks over another channel — the injected
-   * inspector, over Vite's HMR websocket.
+   * Attaches a page: the injected inspector, over Vite's HMR websocket.
    *
    * `key` identifies the connection, so a page that says hello again after a
    * reconnect replaces itself instead of becoming a second page; the same key
@@ -263,14 +215,6 @@ export class BridgeHub {
 
   /** Drops every page, used when the dev server shuts down. */
   dispose(): void {
-    for (const page of this.pages.values()) {
-      try {
-        page.channel.close?.();
-      } catch {
-        // already gone
-      }
-    }
-
     this.pages.clear();
 
     for (const waiting of this.pending.values()) {

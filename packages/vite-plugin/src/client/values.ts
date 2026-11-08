@@ -10,12 +10,31 @@ export function draftOf(value: StampedValue): string {
 
 export type Parsed = { ok: true; value: unknown } | { ok: false; error: string };
 
-/** Reads what was typed as the same kind of value the literal was. */
+const HEX_COLOR = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i;
+const HEX_NUMBER = /^0x[0-9a-f]+$/i;
+
+/** `#abc` as the number it is, the way three reads it. */
+function colorNumber(text: string): number {
+  const digits = text.slice(1);
+  return parseInt(digits.length === 3 ? [...digits].map((digit) => digit + digit).join("") : digits, 16);
+}
+
+/**
+ * Reads what was typed as the same kind of value the literal was.
+ *
+ * A colour can be typed either way round: `#ff0000` where the code wrote `0x88aa55`,
+ * or `0xff0000` where it wrote `"#88aa55"`. The panel previews both, so a save has to
+ * write each in the form the code already uses. Written as it was typed, a string
+ * `"0xff0000"` is a colour three can't read.
+ */
 export function parseDraft(original: StampedValue, draft: string): Parsed {
   const current = original.value;
 
   if (typeof current === "number") {
     const trimmed = draft.trim();
+    if (HEX_COLOR.test(trimmed) && HEX_NUMBER.test(original.raw.replace(/^-/, ""))) {
+      return { ok: true, value: colorNumber(trimmed) };
+    }
     const number = Number(trimmed);
     return trimmed !== "" && Number.isFinite(number)
       ? { ok: true, value: number }
@@ -30,6 +49,13 @@ export function parseDraft(original: StampedValue, draft: string): Parsed {
 
   if (current === null && draft === "null") {
     return { ok: true, value: null };
+  }
+
+  if (typeof current === "string" && HEX_COLOR.test(current) && HEX_NUMBER.test(draft.trim())) {
+    const number = Number(draft.trim());
+    if (Number.isInteger(number) && number >= 0 && number <= 0xffffff) {
+      return { ok: true, value: `#${number.toString(16).padStart(6, "0")}` };
+    }
   }
 
   return { ok: true, value: draft };

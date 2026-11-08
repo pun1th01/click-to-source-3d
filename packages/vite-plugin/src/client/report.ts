@@ -1,5 +1,5 @@
 import type { PointedObject } from "@click-to-source-3d/shared";
-import { formatBytes, plural, valueText, vectorText } from "./format.js";
+import { elementLabel, formatBytes, plural, usesOf, valueText, vectorText } from "./format.js";
 
 export type ReportContext = {
   url: string;
@@ -34,6 +34,33 @@ export function reportMarkdown(object: PointedObject, context: ReportContext): s
     }
   }
 
+  if (object.modelPath) {
+    lines.push("");
+    lines.push(`Part of it: ${code(object.modelPath)}.`);
+  }
+
+  if (object.trace.length > 0) {
+    lines.push("");
+    lines.push("Called from:");
+    lines.push("");
+    for (const frame of [...object.trace].reverse()) {
+      const args = frame.args.map((arg) => `${arg.name} = ${arg.value}`).join(", ");
+      const where = frame.calledAt ?? frame;
+      lines.push(`- ${code(`${frame.name}(${args})`)} at ${code(`${where.file}:${where.line}`)}`);
+    }
+  }
+
+  const uses = usesOf(object);
+  if (uses.length > 0) {
+    lines.push("");
+    lines.push("Uses:");
+    lines.push("");
+    for (const use of uses) {
+      const where = use.file ? `${use.file}:${use.line}` : use.package;
+      lines.push(`${"  ".repeat(use.depth)}- ${code(use.name)}${where ? ` (${where})` : ""}`);
+    }
+  }
+
   lines.push("");
   lines.push("| transform | |");
   lines.push("|---|---|");
@@ -47,7 +74,7 @@ export function reportMarkdown(object: PointedObject, context: ReportContext): s
     lines.push("Values in source:");
     lines.push("");
     for (const prop of object.props) {
-      lines.push(`- ${code(`<${prop.element}>`)} ${prop.name}: ${prop.values.map((value) => code(valueText(value))).join(", ")}`);
+      lines.push(`- ${code(elementLabel(prop.element))} ${prop.name}: ${prop.values.map((value) => code(valueText(value))).join(", ")}`);
     }
   }
 

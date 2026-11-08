@@ -9,6 +9,132 @@ import { stampSource } from "../src/stampSource.js";
  * the two halves to one contract: whatever the stamp says is editable, the
  * editor can edit, at exactly that place.
  */
+describe("editSource, by the file's language", () => {
+  const edit = (file: string, source: string, expected: string, newValue: unknown) =>
+    editSource(source, {
+      file,
+      line: 1,
+      column: source.indexOf(expected) + 1,
+      expected,
+      newValue,
+    });
+
+  // As JSX these read as the start of an element, and the file can't be parsed at all.
+  it("reads a .ts file's casts and generics", () => {
+    expect(edit("a.ts", "const a = <number>b; const f = <T>(x: T) => x; const n = 1;", "1", 2)).toBe(
+      "const a = <number>b; const f = <T>(x: T) => x; const n = 2;"
+    );
+  });
+
+  it("reads plain JavaScript", () => {
+    expect(edit("a.js", "export const n = 1;", "1", 2)).toBe("export const n = 2;");
+  });
+
+  it("reads a .jsx file's elements", () => {
+    expect(edit("a.jsx", "const a = <mesh scale={1} />;", "1", 2)).toBe("const a = <mesh scale={2} />;");
+  });
+
+  it("reads a decorator", () => {
+    expect(edit("a.ts", "@dec class A { n = 1; }", "1", 2)).toBe("@dec class A { n = 2; }");
+  });
+});
+
+describe("editSource for a script in a page", () => {
+  const PAGE = [
+    "<!doctype html>",
+    "<html><body>",
+    '  <script type="module">',
+    "    const a = 1.5; const color = 0x88aa55;",
+    '    const name = "hello";',
+    "  </script>",
+    "</body></html>",
+    "",
+  ].join("\n");
+  const edit = (line: number, expected: string, newValue: unknown) =>
+    editSource(PAGE, {
+      file: "index.html",
+      line,
+      column: PAGE.split("\n")[line - 1].indexOf(expected) + 1,
+      expected,
+      newValue,
+    });
+
+  it("rewrites just the literal, leaving the page as it was", () => {
+    expect(edit(4, "1.5", 2)).toBe(PAGE.replace("const a = 1.5;", "const a = 2;"));
+  });
+
+  it("keeps hex as hex", () => {
+    expect(edit(4, "0x88aa55", 0xff0000)).toBe(PAGE.replace("0x88aa55", "0xff0000"));
+  });
+
+  it("writes a string as a string", () => {
+    expect(edit(5, '"hello"', "bye")).toBe(PAGE.replace('"hello"', '"bye"'));
+  });
+
+  it("handles line endings as Windows writes them", () => {
+    const windows = PAGE.split("\n").join("\r\n");
+    const result = editSource(windows, { file: "index.html", line: 4, column: 15, expected: "1.5", newValue: 2 });
+
+    expect(result).toBe(windows.replace("const a = 1.5;", "const a = 2;"));
+  });
+
+  it("refuses when the text there has changed", () => {
+    expect(() =>
+      editSource(PAGE, { file: "index.html", line: 4, column: 15, expected: "9.9", newValue: 2 })
+    ).toThrowError(expect.objectContaining({ code: "STALE_LOCATION" }));
+  });
+
+  it("refuses a position past the end of the file", () => {
+    expect(() =>
+      editSource(PAGE, { file: "index.html", line: 400, column: 1, expected: "1.5", newValue: 2 })
+    ).toThrowError(expect.objectContaining({ code: "STALE_LOCATION" }));
+  });
+
+  it("only edits by position, since names mean nothing in HTML", () => {
+    expect(() => editSource(PAGE, { file: "index.html", line: 4, argName: "a", newValue: 2 })).toThrowError(
+      expect.objectContaining({ code: "INVALID_REQUEST" })
+    );
+  });
+
+  it("refuses a value it can't write", () => {
+    expect(() =>
+      editSource(PAGE, { file: "index.html", line: 4, column: 15, expected: "1.5", newValue: { a: 1 } })
+    ).toThrowError(expect.objectContaining({ code: "UNSUPPORTED_VALUE" }));
+  });
+});
+
+describe("editSource keeps a colour as it was written", () => {
+  const edit = (expected: string, newValue: unknown) =>
+    editSource(`const color = ${expected};`, {
+      file: "a.js",
+      line: 1,
+      column: 15,
+      expected,
+      newValue,
+    });
+
+  it("stays in hex", () => {
+    expect(edit("0x88aa55", 0xff0000)).toBe("const color = 0xff0000;");
+  });
+
+  it("keeps its length", () => {
+    expect(edit("0x88aa55", 0xff)).toBe("const color = 0x0000ff;");
+  });
+
+  it("keeps its case", () => {
+    expect(edit("0X88AA55", 0xabcdef)).toBe("const color = 0XABCDEF;");
+  });
+
+  it("gives up on a value hex can't write", () => {
+    expect(edit("0x10", 1.5)).toBe("const color = 1.5;");
+    expect(edit("0x10", -1)).toBe("const color = -1;");
+  });
+
+  it("leaves other numbers as they are", () => {
+    expect(edit("16", 255)).toBe("const color = 255;");
+  });
+});
+
 describe("editSource by position", () => {
   const SCENE = [
     "const HEIGHT = 1.4;",

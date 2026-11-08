@@ -2,6 +2,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as THREE from "three";
 import { AGENT_ACTIVITY_EVENT, AGENT_SELECTION_EVENT, AGENT_STATE_EVENT } from "@click-to-source-3d/shared";
+import { ctsEnter, ctsLeave, ctsNew, ctsSite } from "@click-to-source-3d/core/devtools";
 import { AgentLink } from "../../src/client/agentLink.js";
 import { Discovery } from "../../src/client/discovery.js";
 import { Inspector } from "../../src/client/inspector.js";
@@ -69,6 +70,432 @@ function announce(renderer: THREE.WebGLRenderer) {
 }
 
 const shadow = () => document.querySelector("cts-devtools")!.shadowRoot!;
+
+describe("finding what is on the page", () => {
+  afterEach(() => {
+    delete (globalThis as { __THREE_DEVTOOLS__?: EventTarget }).__THREE_DEVTOOLS__;
+    delete (globalThis as { __CTS_EARLY_RENDERERS__?: unknown }).__CTS_EARLY_RENDERERS__;
+    document.body.replaceChildren();
+    delete (document as { elementsFromPoint?: unknown }).elementsFromPoint;
+  });
+
+  it("finds a WebGPURenderer", () => {
+    delete (globalThis as { __THREE_DEVTOOLS__?: EventTarget }).__THREE_DEVTOOLS__;
+    const discovery = new Discovery(null);
+    discovery.install();
+    const renderer = {
+      isRenderer: true,
+      isWebGPURenderer: true,
+      domElement: canvasAt(100, 100),
+      autoClear: true,
+      getRenderTarget: () => null,
+      render: () => undefined,
+    } as unknown as THREE.WebGLRenderer;
+
+    announce(renderer);
+
+    expect(discovery.all().map((view) => view.renderer)).toEqual([renderer]);
+  });
+
+  it("follows a frame drawn with renderAsync, and adds its highlight after", async () => {
+    delete (globalThis as { __THREE_DEVTOOLS__?: EventTarget }).__THREE_DEVTOOLS__;
+    const discovery = new Discovery(null);
+    discovery.install();
+    const drawn: unknown[] = [];
+    const renderer = {
+      isRenderer: true,
+      isWebGPURenderer: true,
+      domElement: canvasAt(100, 100),
+      autoClear: true,
+      getRenderTarget: () => null,
+      render: () => undefined,
+      renderAsync: async (scene: unknown) => {
+        drawn.push(scene);
+      },
+    } as unknown as THREE.WebGLRenderer & { renderAsync(scene: unknown, camera: unknown): Promise<void> };
+    announce(renderer);
+    const [view] = discovery.all();
+    const scene = new THREE.Scene();
+    const mesh = new THREE.Mesh(new THREE.BoxGeometry());
+    scene.add(mesh);
+    const camera = new THREE.PerspectiveCamera();
+
+    await renderer.renderAsync(scene, camera);
+    expect(view.scene()).toBe(scene);
+    expect(drawn).toEqual([scene]);
+
+    view.layer.set("selected", { object: mesh });
+    await renderer.renderAsync(scene, camera);
+
+    expect(drawn).toEqual([scene, scene, view.layer.scene]);
+    expect(renderer.autoClear).toBe(true);
+  });
+
+  it("takes a renderer made before it loaded", () => {
+    delete (globalThis as { __THREE_DEVTOOLS__?: EventTarget }).__THREE_DEVTOOLS__;
+    const { renderer } = fakeRenderer(canvasAt(100, 100));
+    (globalThis as { __CTS_EARLY_RENDERERS__?: unknown }).__CTS_EARLY_RENDERERS__ = [renderer];
+
+    const discovery = new Discovery(null);
+    discovery.install();
+
+    expect(discovery.all().map((view) => view.renderer)).toEqual([renderer]);
+  });
+
+  describe("a pointer over something other than the canvas", () => {
+    const setUp = () => {
+      delete (globalThis as { __THREE_DEVTOOLS__?: EventTarget }).__THREE_DEVTOOLS__;
+      const discovery = new Discovery(null);
+      discovery.install();
+      const canvas = canvasAt(100, 100);
+      announce(fakeRenderer(canvas).renderer);
+      const overlay = document.createElement("div");
+      document.body.append(overlay);
+      (document as unknown as { elementsFromPoint: () => Element[] }).elementsFromPoint = () => [overlay, canvas];
+      return { discovery, canvas, overlay };
+    };
+
+    it("finds the canvas it's over", () => {
+      const { discovery, canvas } = setUp();
+
+      expect(discovery.viewAt(canvas, 1, 1)?.canvas).toBe(canvas);
+    });
+
+    it("looks through a layer on top of the canvas", () => {
+      const { discovery, canvas, overlay } = setUp();
+
+      expect(discovery.viewAt(overlay, 1, 1)?.canvas).toBe(canvas);
+    });
+
+    it.each(["button", "a", "input", "select", "textarea", "label", "summary"])("leaves a <%s> its click", (tag) => {
+      const { discovery } = setUp();
+      const control = document.createElement(tag);
+      document.body.append(control);
+
+      expect(discovery.viewAt(control, 1, 1)).toBeNull();
+    });
+
+    it("leaves something inside a control its click", () => {
+      const { discovery } = setUp();
+      const button = document.createElement("button");
+      const icon = document.createElement("span");
+      button.append(icon);
+      document.body.append(button);
+
+      expect(discovery.viewAt(icon, 1, 1)).toBeNull();
+    });
+
+    it("leaves the inspector's own panel alone", () => {
+      const { discovery } = setUp();
+
+      expect(discovery.viewAt(document.createElement("cts-devtools"), 1, 1)).toBeNull();
+    });
+
+    it("finds nothing where no canvas is under the pointer", () => {
+      const { discovery, overlay } = setUp();
+      (document as unknown as { elementsFromPoint: () => Element[] }).elementsFromPoint = () => [overlay];
+
+      expect(discovery.viewAt(overlay, 1, 1)).toBeNull();
+    });
+  });
+});
+
+describe("the injected inspector, for plain three.js", () => {
+  const terrainStamp = (line: number, extra: object = {}) => ({
+    file: "src/world.js",
+    function: "createTerrain",
+    line,
+    column: 3,
+    ...extra,
+  });
+  const literal = (raw: string, line: number, column: number) => ({
+    raw,
+    value: Number(raw),
+    editable: true,
+    line,
+    column,
+  });
+  const generator = {
+    id: "src/world.js#createTerrain",
+    name: "createTerrain",
+    file: "src/world.js",
+    line: 30,
+    column: 8,
+    params: [{ name: "size", arg: 0 }],
+    numbers: [{ line: 36, text: "const height = fbm(x * 0.08) * 6;", values: [literal("0.08", 36, 26)] }],
+    uses: [
+      {
+        name: "fbm",
+        depth: 0,
+        file: "src/noise.js",
+        line: 21,
+        column: 8,
+        params: ["x", "y"],
+        numbers: [{ line: 22, text: "let amplitude = 0.5;", values: [literal("0.5", 22, 19)] }],
+      },
+      { name: "hash", depth: 1, file: "src/noise.js", line: 1, column: 8, params: ["x"], numbers: [] },
+      { name: "createNoise2D", depth: 0, package: "simplex-noise" },
+    ],
+  };
+
+  let inspector: Inspector;
+  let terrain: THREE.Mesh;
+  let canvas: HTMLCanvasElement;
+
+  const selectTerrain = () => {
+    inspector.setInspecting(true);
+    canvas.dispatchEvent(new MouseEvent("pointerdown", { bubbles: true, clientX: 200, clientY: 200 }));
+    canvas.dispatchEvent(new MouseEvent("click", { bubbles: true, clientX: 200, clientY: 200 }));
+  };
+  const text = () => shadow().querySelector(".panel")!.textContent ?? "";
+  const postsOf = (fetcher: ReturnType<typeof vi.fn>) =>
+    fetcher.mock.calls
+      .filter(([url]) => url === "/__cts/write-file")
+      .map(([, init]) => JSON.parse((init as { body: string }).body));
+
+  beforeEach(() => {
+    sessionStorage.clear();
+    delete (globalThis as { __THREE_DEVTOOLS__?: EventTarget }).__THREE_DEVTOOLS__;
+    delete (globalThis as { __CTS_TRACE__?: unknown }).__CTS_TRACE__;
+
+    const discovery = new Discovery(null);
+    discovery.install();
+    canvas = canvasAt(400, 400);
+    const { renderer } = fakeRenderer(canvas);
+    announce(renderer);
+
+    const scene = new THREE.Scene();
+    terrain = ctsNew(
+      new THREE.Mesh(
+        ctsNew(
+          new THREE.BoxGeometry(2, 2, 2),
+          terrainStamp(31, {
+            creates: "BoxGeometry",
+            how: "new",
+            generator,
+            props: [{ element: "BoxGeometry", name: "args", array: true, values: [literal("2", 31, 40)] }],
+          })
+        ),
+        ctsNew(
+          new THREE.MeshStandardMaterial({ color: "#336699", roughness: 0.5 }),
+          terrainStamp(43, {
+            creates: "MeshStandardMaterial",
+            how: "new",
+            generator,
+            props: [
+              { element: "MeshStandardMaterial", name: "roughness", array: false, values: [literal("0.5", 43, 60)] },
+              {
+                element: "MeshStandardMaterial",
+                name: "color",
+                array: false,
+                values: [{ raw: '"#336699"', value: "#336699", editable: true, line: 43, column: 40 }],
+              },
+            ],
+          })
+        )
+      ),
+      terrainStamp(41, { creates: "Mesh", how: "new", generator })
+    );
+    scene.add(terrain);
+    scene.updateMatrixWorld(true);
+    const camera = new THREE.PerspectiveCamera(50, 1, 0.1, 100);
+    camera.position.set(0, 0, 10);
+    camera.updateMatrixWorld(true);
+    renderer.render(scene, camera);
+
+    inspector = new Inspector(discovery, { hotkey: "alt+shift+c", button: true }, null);
+    inspector.mount();
+  });
+
+  afterEach(() => {
+    document.querySelector("cts-devtools")?.remove();
+    canvas.remove();
+    vi.unstubAllGlobals();
+  });
+
+  it("names where it came from, with nothing tagged", () => {
+    selectTerrain();
+
+    expect(text()).toContain("createTerrain");
+    expect(text()).toContain("src/world.js:41");
+    expect(terrain.userData).toEqual({});
+  });
+
+  it("gathers the properties of its geometry and material, wherever they were written", () => {
+    selectTerrain();
+
+    const elements = [...shadow().querySelectorAll(".element")].map((element) => element.textContent);
+    expect(elements).toContain("BoxGeometrysrc/world.js:31");
+    expect(elements).toContain("MeshStandardMaterialsrc/world.js:43");
+  });
+
+  it("lists the helpers, indented as they call each other, with packages named", () => {
+    selectTerrain();
+
+    const row = (name: string) => shadow().querySelector<HTMLElement>(`[data-cts-use="${name}"]`)!;
+    expect(row("fbm").textContent).toContain("fbm(x, y)");
+    expect(row("fbm").textContent).toContain("src/noise.js:21");
+    expect(row("hash").style.marginLeft).toBe("12px");
+    expect(row("createNoise2D").textContent).toContain("simplex-noise");
+  });
+
+  it("lists the other numbers with the line each is on", () => {
+    selectTerrain();
+
+    expect(text()).toContain("const height = fbm(x * 0.08) * 6;");
+    const input = shadow().querySelector<HTMLInputElement>('[data-cts-edit="createTerrain.line 36[0]"]')!;
+    expect(input.value).toBe("0.08");
+    // Nothing in the scene can show it, so there is nothing to drag.
+    expect(shadow().querySelector('[data-cts-slider="createTerrain.line 36[0]"]')).toBeNull();
+  });
+
+  it("previews a colour as it is typed, and only once it is one", () => {
+    selectTerrain();
+    const material = terrain.material as THREE.MeshStandardMaterial;
+    const field = shadow().querySelector<HTMLInputElement>('[data-cts-edit="MeshStandardMaterial.color"]')!;
+    expect(shadow().querySelector('[data-cts-slider="MeshStandardMaterial.color"]')).toBeNull();
+
+    field.value = "#ff";
+    field.dispatchEvent(new Event("input"));
+    expect(material.color.getHexString()).toBe("336699");
+
+    field.value = "#ff0000";
+    field.dispatchEvent(new Event("input"));
+    expect(material.color.getHexString()).toBe("ff0000");
+
+    field.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    expect(material.color.getHexString()).toBe("336699");
+  });
+
+  it("writes a helper's number to the helper's file", async () => {
+    const fetcher = vi.fn(async () => new Response(JSON.stringify({ success: true }), { status: 200 }));
+    vi.stubGlobal("fetch", fetcher);
+    selectTerrain();
+
+    const field = shadow().querySelector<HTMLInputElement>('[data-cts-edit="fbm.line 22[0]"]')!;
+    field.value = "0.25";
+    field.dispatchEvent(new Event("input"));
+    field.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+
+    await vi.waitFor(() => expect(postsOf(fetcher)).toHaveLength(1));
+    expect(postsOf(fetcher)[0].edits[0]).toMatchObject({
+      file: "src/noise.js",
+      line: 22,
+      column: 19,
+      expected: "0.5",
+      newValue: 0.25,
+    });
+  });
+
+  it("describes all of it for an assistant", () => {
+    selectTerrain();
+    const selected = inspector.api().selection()!;
+
+    expect(selected.how).toBe("new");
+    expect(selected.generators.map((fn) => fn.name)).toEqual(["createTerrain"]);
+    expect(selected.props.map((prop) => prop.file)).toEqual(["src/world.js", "src/world.js", "src/world.js"]);
+  });
+});
+
+describe("the injected inspector, with a call chain", () => {
+  let inspector: Inspector;
+  let canvas: HTMLCanvasElement;
+
+  beforeEach(() => {
+    sessionStorage.clear();
+    delete (globalThis as { __THREE_DEVTOOLS__?: EventTarget }).__THREE_DEVTOOLS__;
+    delete (globalThis as { __CTS_TRACE__?: unknown }).__CTS_TRACE__;
+
+    const discovery = new Discovery(null);
+    discovery.install();
+    canvas = canvasAt(400, 400);
+    const { renderer } = fakeRenderer(canvas);
+    announce(renderer);
+
+    const source = (name: string, params: string[]) => ({
+      id: `src/world.js#${name}`,
+      name,
+      file: "src/world.js",
+      line: 8,
+      column: 8,
+      params: params.map((param, arg) => ({ name: param, arg })),
+      numbers: [],
+      uses: [],
+    });
+    const scene = new THREE.Scene();
+
+    ctsSite({
+      target: "src/world.js#buildWorld",
+      file: "src/main.js",
+      line: 23,
+      column: 1,
+      args: [null, { raw: "7", value: 7, editable: true, line: 23, column: 18 }],
+    });
+    ctsEnter(source("buildWorld", ["scene", "seed"]), [scene, 7]);
+    ctsSite({ target: "src/world.js#createTerrain", file: "src/world.js", line: 9, column: 3, args: [null] });
+    ctsEnter(source("createTerrain", ["size"]), [40]);
+    const mesh = ctsNew(
+      new THREE.Mesh(new THREE.BoxGeometry(2, 2, 2), new THREE.MeshBasicMaterial()),
+      { file: "src/world.js", function: "createTerrain", line: 41, column: 3, how: "new" }
+    );
+    ctsLeave();
+    ctsLeave();
+
+    scene.add(mesh);
+    scene.updateMatrixWorld(true);
+    const camera = new THREE.PerspectiveCamera(50, 1, 0.1, 100);
+    camera.position.set(0, 0, 10);
+    camera.updateMatrixWorld(true);
+    renderer.render(scene, camera);
+
+    inspector = new Inspector(discovery, { hotkey: "alt+shift+c", button: true }, null);
+    inspector.mount();
+    inspector.setInspecting(true);
+    canvas.dispatchEvent(new MouseEvent("pointerdown", { bubbles: true, clientX: 200, clientY: 200 }));
+    canvas.dispatchEvent(new MouseEvent("click", { bubbles: true, clientX: 200, clientY: 200 }));
+  });
+
+  afterEach(() => {
+    document.querySelector("cts-devtools")?.remove();
+    canvas.remove();
+    vi.unstubAllGlobals();
+  });
+
+  const frames = () => [...shadow().querySelectorAll<HTMLElement>("[data-cts-frame]")];
+
+  it("shows the nearest call first, with where each was made", () => {
+    expect(frames().map((frame) => frame.dataset.ctsFrame)).toEqual(["createTerrain", "buildWorld"]);
+    expect(frames()[1].textContent).toContain("src/main.js:23");
+  });
+
+  it("shows a value passed along as it was, read-only", () => {
+    expect(frames()[0].querySelector("input")).toBeNull();
+    expect(frames()[0].textContent).toContain("40");
+    expect(frames()[1].textContent).toContain("<Scene>");
+  });
+
+  it("writes a literal argument where the call is", async () => {
+    const fetcher = vi.fn(async () => new Response(JSON.stringify({ success: true }), { status: 200 }));
+    vi.stubGlobal("fetch", fetcher);
+
+    const field = frames()[1].querySelector<HTMLInputElement>("input")!;
+    expect(field.value).toBe("7");
+    expect(field.getAttribute("data-cts-edit")).toBe("buildWorld.seed");
+    expect(frames()[1].querySelector("input.slider")).toBeNull();
+
+    field.value = "12";
+    field.dispatchEvent(new Event("input"));
+    field.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+
+    await vi.waitFor(() => expect(fetcher).toHaveBeenCalled());
+    const body = JSON.parse((fetcher.mock.calls[0] as unknown as [string, { body: string }])[1].body);
+    expect(body.edits[0]).toMatchObject({ file: "src/main.js", line: 23, column: 18, expected: "7", newValue: 12 });
+  });
+
+  it("tells a report about the calls", () => {
+    expect(inspector.api().selection()!.trace.map((frame) => frame.name)).toEqual(["buildWorld", "createTerrain"]);
+  });
+});
 
 describe("the injected inspector", () => {
   let canvas: HTMLCanvasElement;
@@ -468,7 +895,9 @@ describe("the injected inspector", () => {
       field().dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
       await vi.waitFor(() => expect(posts).toHaveLength(1));
 
-      expect(posts[0]).toMatchObject({ file: "src/Scene.tsx", line: 12, column: 20, expected: "1.5", newValue: 3 });
+      expect(posts[0]).toMatchObject({
+        edits: [{ file: "src/Scene.tsx", line: 12, column: 20, expected: "1.5", newValue: 3 }],
+      });
       await vi.waitFor(() => expect(shadow().querySelector(".status")!.textContent).toContain("Saved scale"));
       // The saved value stays on screen, for R3F to apply.
       expect(world.box.scale.x).toBe(3);
@@ -501,11 +930,12 @@ describe("the injected inspector", () => {
       ];
     }
 
-    it("writes the last in the file first, so no position goes stale", async () => {
+    // A save can reload the page, and a request not yet sent by then never would be.
+    it("sends them all in one request", async () => {
       worldWithValues();
       inspector.setInspecting(true);
       clickCanvas();
-      const posts: Array<{ column: number; newValue: number }> = [];
+      const posts: Array<{ edits: Array<{ column: number; newValue: number }> }> = [];
       vi.stubGlobal("fetch", async (_url: string, init: { body: string }) => {
         posts.push(JSON.parse(init.body));
         return new Response(JSON.stringify({ ok: true }), { status: 200 });
@@ -519,9 +949,9 @@ describe("the injected inspector", () => {
 
       expect(shadow().querySelector(".unsaved")!.textContent).toContain("2 unsaved values");
       shadow().querySelector<HTMLButtonElement>('[data-cts-action="save"]')!.click();
-      await vi.waitFor(() => expect(posts).toHaveLength(2));
+      await vi.waitFor(() => expect(posts).toHaveLength(1));
 
-      expect(posts.map((post) => post.column)).toEqual([26, 20]);
+      expect(posts[0].edits.map((edit) => [edit.column, edit.newValue])).toEqual([[20, 10], [26, 30]]);
       await vi.waitFor(() => expect(shadow().querySelector(".status")!.textContent).toContain("Saved 2 values"));
       vi.unstubAllGlobals();
     });
@@ -585,7 +1015,7 @@ describe("the injected inspector", () => {
       });
 
       it("writes the one literal once", async () => {
-        const posts: Array<{ newValue: number; line: number; column: number }> = [];
+        const posts: Array<{ edits: Array<{ newValue: number; line: number; column: number }> }> = [];
         vi.stubGlobal("fetch", async (_url: string, init: { body: string }) => {
           posts.push(JSON.parse(init.body));
           return new Response(JSON.stringify({ ok: true }), { status: 200 });
@@ -597,22 +1027,20 @@ describe("the injected inspector", () => {
         await vi.waitFor(() => expect(shadow().querySelector(".status")!.textContent).toContain("Saved SIZE"));
 
         expect(posts).toHaveLength(1);
-        expect(posts[0]).toMatchObject({ newValue: 6, line: 3, column: 15 });
+        expect(posts[0].edits).toHaveLength(1);
+        expect(posts[0].edits[0]).toMatchObject({ newValue: 6, line: 3, column: 15 });
         vi.unstubAllGlobals();
       });
     });
 
-    it("says how far it got when a write fails partway", async () => {
+    it("keeps what was typed when the save is refused, and says why", async () => {
       worldWithValues();
       inspector.setInspecting(true);
       clickCanvas();
-      let calls = 0;
-      vi.stubGlobal("fetch", async () => {
-        calls++;
-        return calls === 1
-          ? new Response(JSON.stringify({ ok: true }), { status: 200 })
-          : new Response(JSON.stringify({ error: "The file changed", code: "STALE_LOCATION" }), { status: 409 });
-      });
+      vi.stubGlobal(
+        "fetch",
+        async () => new Response(JSON.stringify({ error: "The file changed", code: "STALE_LOCATION" }), { status: 409 })
+      );
 
       for (const [index, next] of [[0, "10"], [2, "30"]] as const) {
         const input = shadow().querySelector<HTMLInputElement>(`[data-cts-edit="mesh.position[${index}]"]`)!;
@@ -621,7 +1049,8 @@ describe("the injected inspector", () => {
       }
       shadow().querySelector<HTMLButtonElement>('[data-cts-action="save"]')!.click();
 
-      await vi.waitFor(() => expect(shadow().querySelector(".status")!.textContent).toContain("Saved 1 of 2"));
+      await vi.waitFor(() => expect(shadow().querySelector(".status")!.textContent).toContain("The file changed"));
+      expect(shadow().querySelector(".unsaved")!.textContent).toContain("2 unsaved values");
       vi.unstubAllGlobals();
     });
   });
@@ -996,16 +1425,89 @@ describe("pointing an assistant at objects", () => {
       shadow().querySelector<HTMLButtonElement>('[data-cts-open-tab="agent"]')!.click();
     });
 
-    it("says how to connect an assistant when none is", () => {
+    it("says no assistant is connected", () => {
       expect(agentTab().textContent).toContain("No assistant connected");
-      expect(agentTab().textContent).toContain("npx click-to-source-3d init --mcp");
     });
 
-    it("drops that once one connects", () => {
-      channel.emit(AGENT_STATE_EVENT, { agents: [claude], log: [] });
+    describe("turning on the MCP server", () => {
+      const off = { folder: "my-scene", registered: [], written: [], problems: [], assistant: "Claude Code" };
+      const on = { ...off, registered: [".mcp.json"], written: [".mcp.json"] };
+      const button = () => agentTab().querySelector<HTMLButtonElement>('[data-cts-action="mcp-on"]');
+      const reply = (status: number, body: unknown) =>
+        new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
 
-      expect(agentTab().textContent).toContain("Claude Code connected · no calls yet");
-      expect(agentTab().textContent).not.toContain("init --mcp");
+      /** Opens the tab again with the dev server answering as given. */
+      async function open(answer: (init?: RequestInit) => Response) {
+        const fetcher = vi.fn(async (_url: string, init?: RequestInit) => answer(init));
+        vi.stubGlobal("fetch", fetcher);
+        shadow().querySelector<HTMLButtonElement>('[data-cts-open-tab="inspect"]')!.click();
+        (inspector as unknown as { setupAsked: boolean; agent: { setup: unknown } }).setupAsked = false;
+        (inspector as unknown as { agent: { setup: unknown } }).agent.setup = null;
+        shadow().querySelector<HTMLButtonElement>('[data-cts-open-tab="agent"]')!.click();
+        await vi.waitFor(() => expect(fetcher).toHaveBeenCalled());
+        return fetcher;
+      }
+
+      afterEach(() => {
+        vi.unstubAllGlobals();
+      });
+
+      it("offers a button where it isn't on", async () => {
+        await open(() => reply(200, off));
+
+        await vi.waitFor(() => expect(button()).not.toBeNull());
+        expect(button()!.textContent).toContain("Turn on MCP server");
+        expect(agentTab().textContent).toContain('.mcp.json in "my-scene"');
+      });
+
+      it("turns it on, and says what to do next", async () => {
+        const fetcher = await open((init) => reply(200, init?.method === "POST" ? on : off));
+        await vi.waitFor(() => expect(button()).not.toBeNull());
+
+        button()!.click();
+
+        await vi.waitFor(() => expect(agentTab().querySelector('[data-cts-mcp="on"]')).not.toBeNull());
+        expect(fetcher).toHaveBeenCalledWith("/__cts/mcp", { method: "POST" });
+        expect(agentTab().textContent).toContain("Now start Claude Code in \"my-scene\"");
+        expect(button()).toBeNull();
+      });
+
+      it("says it is already on, with no button", async () => {
+        await open(() => reply(200, on));
+
+        await vi.waitFor(() => expect(agentTab().querySelector('[data-cts-mcp="on"]')).not.toBeNull());
+        expect(button()).toBeNull();
+      });
+
+      it("says why when it couldn't", async () => {
+        await open((init) => (init?.method === "POST" ? reply(500, { error: "disk full" }) : reply(200, off)));
+        await vi.waitFor(() => expect(button()).not.toBeNull());
+
+        button()!.click();
+
+        await vi.waitFor(() => expect(agentTab().querySelector('[role="alert"]')?.textContent).toContain("disk full"));
+        expect(button()).not.toBeNull();
+      });
+
+      it("says which file it couldn't edit", async () => {
+        const problem = { ...off, problems: [{ file: ".mcp.json", reason: "Unexpected token" }] };
+        await open((init) => reply(200, init?.method === "POST" ? problem : off));
+        await vi.waitFor(() => expect(button()).not.toBeNull());
+
+        button()!.click();
+
+        await vi.waitFor(() => expect(agentTab().querySelector('[role="alert"]')?.textContent).toContain(".mcp.json: Unexpected token"));
+      });
+
+      it("isn't offered once an assistant connects", async () => {
+        await open(() => reply(200, off));
+        await vi.waitFor(() => expect(button()).not.toBeNull());
+
+        channel.emit(AGENT_STATE_EVENT, { agents: [claude], log: [] });
+
+        expect(agentTab().textContent).toContain("Claude Code connected · no calls yet");
+        expect(button()).toBeNull();
+      });
     });
 
     it("adds the selected object on request", () => {

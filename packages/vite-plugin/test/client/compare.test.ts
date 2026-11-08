@@ -25,6 +25,10 @@ function object(overrides: Partial<PointedObject> = {}): PointedObject {
       textureBytes: 0,
       castsShadow: false,
     },
+    trace: [],
+    generators: [],
+    how: null,
+    modelPath: null,
     ...overrides,
   };
 }
@@ -33,6 +37,34 @@ const row = (rows: ReturnType<typeof compareRows>, label: string) =>
   rows.find((entry) => entry.label === label)!;
 
 describe("compareRows", () => {
+  it("compares how each came to be", () => {
+    const called = object({
+      trace: [
+        { name: "buildWorld", file: "src/world.js", line: 8, args: [{ name: "seed", value: "7" }] },
+        { name: "createTerrain", file: "src/world.js", line: 30, args: [{ name: "size", value: "40" }] },
+      ],
+      generators: [
+        {
+          id: "src/world.js#createTerrain",
+          name: "createTerrain",
+          file: "src/world.js",
+          line: 30,
+          params: [],
+          numbers: [],
+          uses: [{ name: "fbm", depth: 0 }],
+        },
+      ],
+    });
+    const rows = compareRows(called, object());
+
+    expect(row(rows, "called from")).toMatchObject({
+      a: "createTerrain(40) ← buildWorld(7)",
+      b: "—",
+      differs: true,
+    });
+    expect(row(rows, "uses")).toMatchObject({ a: "fbm", b: "—", differs: true });
+  });
+
   it("finds nothing different between two identical objects", () => {
     expect(compareRows(object(), object()).filter((entry) => entry.differs)).toEqual([]);
   });

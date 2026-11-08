@@ -1,4 +1,4 @@
-import type { AgentActivity, AgentInfo } from "@click-to-source-3d/shared";
+import type { AgentActivity, AgentInfo, McpSetupStatus } from "@click-to-source-3d/shared";
 import { h, icon, ICONS } from "./dom.js";
 import { plural } from "./format.js";
 import { labelOf, type Target } from "./targets.js";
@@ -19,7 +19,66 @@ export type AgentTabProps = {
   onClear(): void;
   onSelect(target: Target): void;
   onEntry(entry: AgentActivity): void;
+  /** Whether the MCP server is registered here; null until the dev server says. */
+  setup: McpSetupStatus | null;
+  setupState: "idle" | "working" | { error: string };
+  onTurnOnMcp(): void;
 };
+
+/**
+ * How to get an assistant connected, from where things are. Registering the server
+ * is something the page can do. Starting the assistant isn't: it starts the server.
+ */
+function connectSection(props: AgentTabProps): HTMLElement {
+  const { setup, setupState } = props;
+  const files = setup?.registered ?? [];
+  const where = setup ? `"${setup.folder}"` : "this project";
+  const assistant = setup?.assistant && setup.assistant !== "an MCP client" ? setup.assistant : "your assistant";
+
+  const children: Array<Node | string | null> = [];
+  if (setup === null) {
+    children.push(h("div", { class: "note", text: "Checking whether the assistant tools are set up…" }));
+  } else if (files.length === 0) {
+    children.push(
+      h("div", { class: "note", text: "Turn on the MCP server, and an AI assistant can see this page: what you point at, and everything in the panel." }),
+      h("div", { class: "actions" }, [
+        h(
+          "button",
+          {
+            class: "action primary",
+            attrs: {
+              type: "button",
+              "data-cts-action": "mcp-on",
+              ...(setupState === "working" ? { disabled: "" } : {}),
+            },
+            on: { click: () => props.onTurnOnMcp() },
+          },
+          [icon(ICONS.point), setupState === "working" ? "Turning on…" : "Turn on MCP server"]
+        ),
+      ]),
+      h("div", {
+        class: "hint",
+        text: `Adds click-to-source to .mcp.json in ${where}, and to .cursor/mcp.json or .vscode/mcp.json if you use those. Nothing else changes.`,
+      })
+    );
+  } else {
+    children.push(
+      h("div", { class: "note on", attrs: { "data-cts-mcp": "on" } }, [
+        "MCP server turned on in ",
+        h("code", { class: "mono", text: files.join(", ") }),
+        ".",
+      ]),
+      h("div", {
+        class: "hint",
+        text: `Now start ${assistant} in ${where}, or restart it if it's running, and allow click-to-source when it asks. It connects by itself, and this says so.`,
+      })
+    );
+  }
+  if (typeof setupState === "object") {
+    children.push(h("div", { class: "note bad", attrs: { role: "alert" }, text: `Couldn't turn it on: ${setupState.error}` }));
+  }
+  return h("div", { class: "section connect" }, children);
+}
 
 function ago(milliseconds: number): string {
   const seconds = Math.max(0, Math.round(milliseconds / 1000));
@@ -83,13 +142,7 @@ export function agentTab(props: AgentTabProps): Node[] {
     }),
   ]);
 
-  const help = connected
-    ? null
-    : h("div", { class: "note connect" }, [
-        "To connect one, run ",
-        h("code", { class: "mono", text: "npx click-to-source-3d init --mcp" }),
-        " and start your assistant in this project.",
-      ]);
+  const help = connected ? null : connectSection(props);
 
   const list = h(
     "ol",

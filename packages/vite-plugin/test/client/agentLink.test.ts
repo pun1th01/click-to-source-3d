@@ -247,6 +247,31 @@ describe("AgentLink", () => {
       expect(channel.sent).toEqual([{ event: AGENT_SELECTION_EVENT, data: selection }]);
     });
 
+    // Vite logs an error for each send with the dev server gone, so one per click.
+    it("holds what is published while the dev server is gone, and sends the latest when it's back", () => {
+      const first = { pointing: [], selected: null };
+      const second = { pointing: [], selected: null };
+
+      channel.emit("vite:ws:disconnect");
+      link.publish(first);
+      link.publish(second);
+      expect(channel.sent).toEqual([]);
+
+      channel.emit("vite:ws:connect");
+      expect(channel.sent).toEqual([{ event: AGENT_SELECTION_EVENT, data: second }]);
+      expect((channel.sent[0].data as unknown) === second).toBe(true);
+    });
+
+    it("sends straight away again once the dev server is back", () => {
+      const selection = { pointing: [], selected: null };
+
+      channel.emit("vite:ws:disconnect");
+      channel.emit("vite:ws:connect");
+      link.publish(selection);
+
+      expect(channel.sent).toEqual([{ event: AGENT_SELECTION_EVENT, data: selection }]);
+    });
+
     it("has nothing to send before anything was published", () => {
       channel.emit("vite:ws:connect");
 

@@ -15,6 +15,9 @@ export type R3FRoots = Map<unknown, { store: { getState(): R3FState } }> | null;
 /** How long a scene counts as currently drawn after its last frame. */
 const RECENT_MS = 1000;
 
+/** Something a click on it means the page's own control rather than the scene behind it. */
+const INTERACTIVE = "a,button,input,select,textarea,label,summary,[role=button],[contenteditable]";
+
 /**
  * One renderer and the canvas it draws to: what the inspector picks against
  * and draws its highlight on.
@@ -158,7 +161,8 @@ export class View {
  * and shared if present: the official three.js devtools extension installs
  * one too, and replacing it would blind the extension. For R3F, its own
  * registry of canvases is consulted as well, which also covers a renderer
- * created before this script ran.
+ * created before this script ran. A WebGPURenderer isn't announced by every
+ * version of three, so the plugin's transform announces those it sees made.
  */
 export class Discovery {
   private readonly views = new Map<THREE.WebGLRenderer, View>();
@@ -175,11 +179,19 @@ export class Discovery {
     }
 
     global.__THREE_DEVTOOLS__.addEventListener("observe", (event) => {
-      const detail = (event as CustomEvent).detail as { isWebGLRenderer?: boolean } | null;
-      if (detail?.isWebGLRenderer) {
+      const detail = (event as CustomEvent).detail as {
+        isWebGLRenderer?: boolean;
+        isWebGPURenderer?: boolean;
+        isRenderer?: boolean;
+      } | null;
+      if (detail?.isWebGLRenderer || detail?.isWebGPURenderer || detail?.isRenderer) {
         this.add(detail as THREE.WebGLRenderer);
       }
     });
+
+    for (const renderer of (globalThis as { __CTS_EARLY_RENDERERS__?: THREE.WebGLRenderer[] }).__CTS_EARLY_RENDERERS__ ?? []) {
+      this.add(renderer);
+    }
 
     this.refresh();
   }
@@ -188,7 +200,10 @@ export class Discovery {
   refresh(): void {
     for (const root of this.roots?.values() ?? []) {
       const gl = root.store.getState().gl;
-      if ((gl as { isWebGLRenderer?: boolean } | undefined)?.isWebGLRenderer) {
+      const kinds = gl as unknown as
+        | { isWebGLRenderer?: boolean; isWebGPURenderer?: boolean; isRenderer?: boolean }
+        | undefined;
+      if (kinds?.isWebGLRenderer || kinds?.isWebGPURenderer || kinds?.isRenderer) {
         this.add(gl);
       }
     }
@@ -231,6 +246,22 @@ export class Discovery {
       return result;
     } as typeof renderer.render;
 
+    const asyncRenderer = renderer as unknown as {
+      renderAsync?: (scene: THREE.Object3D, camera: THREE.Camera) => Promise<unknown>;
+    };
+    const renderAsync = asyncRenderer.renderAsync;
+    if (renderAsync) {
+      asyncRenderer.renderAsync = async function (this: THREE.WebGLRenderer, scene, camera) {
+        view.frame(scene, camera);
+        const result = await renderAsync.call(this, scene, camera);
+        view.frameFinished();
+        for (const listener of frameListeners) {
+          listener(view);
+        }
+        return result;
+      };
+    }
+
     this.views.set(renderer, view);
     for (const listener of this.listeners) {
       listener(view);
@@ -243,6 +274,35 @@ export class Discovery {
 
   forCanvas(element: EventTarget | null): View | null {
     return this.all().find((view) => view.canvas === element) ?? null;
+  }
+
+  /**
+   * The view a pointer is over, looking through whatever is on top of its canvas.
+   *
+   * CSS2DRenderer and CSS3DRenderer lay a full-size element over the canvas for
+   * their labels, often with the camera controls attached to it, so a click on the
+   * scene doesn't land on the canvas at all. A control on the page keeps its click.
+   */
+  viewAt(target: EventTarget | null, x: number, y: number): View | null {
+    const direct = this.forCanvas(target);
+    if (direct) {
+      return direct;
+    }
+    if (
+      !(target instanceof Element) ||
+      target.localName === "cts-devtools" ||
+      target.closest(INTERACTIVE) ||
+      this.views.size === 0
+    ) {
+      return null;
+    }
+    for (const element of document.elementsFromPoint?.(x, y) ?? []) {
+      const view = this.forCanvas(element);
+      if (view) {
+        return view;
+      }
+    }
+    return null;
   }
 
   /** The largest canvas on the page: where the toggle button goes. */

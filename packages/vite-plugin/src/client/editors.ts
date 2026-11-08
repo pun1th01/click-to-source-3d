@@ -1,6 +1,6 @@
 import type * as THREE from "three";
 import type { StampedProp, StampedValue } from "@click-to-source-3d/shared";
-import { editSourceAt } from "@click-to-source-3d/core/devtools";
+import { editSourceMany } from "@click-to-source-3d/core/devtools";
 import { h } from "./dom.js";
 import { PreviewSession, type ValuePreview } from "./preview.js";
 import { draftOf, parseDraft, sliderRange, sliderText, type SliderRange } from "./values.js";
@@ -10,6 +10,8 @@ const SETTLE_MS = 800;
 
 type Draft = {
   key: string;
+  /** Which number in which file this field changes. */
+  literal: string;
   file: string;
   prop: StampedProp;
   value: StampedValue;
@@ -32,7 +34,7 @@ function errorText(error: unknown): string {
   return error instanceof Error ? error.message : "Something went wrong";
 }
 
-const literalOf = (value: StampedValue) => `${value.line}:${value.column}`;
+const literalOf = (file: string, value: StampedValue) => `${file}:${value.line}:${value.column}`;
 
 /**
  * The value fields in the panel: what is typed or dragged but not yet saved.
@@ -59,7 +61,7 @@ export class ValueEditors {
 
   /** Numbers in source that would change: one for a constant however many fields show it. */
   get count(): number {
-    return new Set([...this.drafts.values()].map((draft) => literalOf(draft.value))).size;
+    return new Set([...this.drafts.values()].map((draft) => draft.literal)).size;
   }
 
   /** Whether a save is in flight, during which each write brings its own update. */
@@ -67,7 +69,14 @@ export class ValueEditors {
     return this.saving;
   }
 
-  editor(file: string, prop: StampedProp, value: StampedValue, index: number): HTMLElement {
+  /** `live: false` for a value nothing in the scene can show until it is saved. */
+  editor(
+    file: string,
+    prop: StampedProp,
+    value: StampedValue,
+    index: number,
+    options: { live?: boolean } = {}
+  ): HTMLElement {
     if (!value.editable) {
       return h("div", { class: "value ro" }, [h("div", { class: "readonly mono", text: value.raw })]);
     }
@@ -80,8 +89,12 @@ export class ValueEditors {
     input.value = initial;
 
     const start = typeof value.value === "number" ? value.value : null;
-    const preview = start !== null ? (this.session?.previewOf(prop, index) ?? null) : null;
-    const range = preview && start !== null ? sliderRange(preview.paramName ?? prop.name, start) : null;
+    const canShow = options.live !== false && (start !== null || typeof value.value === "string");
+    const preview = canShow ? (this.session?.previewOf(prop, index) ?? null) : null;
+    const range =
+      preview && !preview.isColor && start !== null
+        ? sliderRange(preview.paramName ?? prop.name, start)
+        : null;
     const slider = range
       ? h("input", {
           class: "slider",
@@ -100,19 +113,16 @@ export class ValueEditors {
       slider.value = String(start);
     }
 
-    const draft: Draft = { key, file, prop, value, input, slider, range, initial, preview };
-
-    const literal = literalOf(value);
+    const literal = literalOf(file, value);
+    const draft: Draft = { key, literal, file, prop, value, input, slider, range, initial, preview };
     this.fields.set(literal, [...(this.fields.get(literal) ?? []), draft]);
 
     input.addEventListener("input", () => {
-      const typed = Number(input.value);
-      const isNumber = input.value.trim() !== "" && Number.isFinite(typed) && start !== null;
-
       for (const field of this.sharing(draft)) {
         field.input.value = input.value;
-        if (isNumber) {
-          if (field.slider) {
+        const typed = field.preview?.parse(input.value) ?? null;
+        if (typed !== null) {
+          if (field.slider && typeof typed === "number") {
             // Typing is not limited to how far a drag reaches.
             field.slider.min = String(Math.min(Number(field.slider.min), typed));
             field.slider.max = String(Math.max(Number(field.slider.max), typed));
@@ -161,7 +171,7 @@ export class ValueEditors {
    * the preview has to as well, or it would show something a save will not do.
    */
   private sharing(draft: Draft): Draft[] {
-    return this.fields.get(literalOf(draft.value)) ?? [draft];
+    return this.fields.get(draft.literal) ?? [draft];
   }
 
   private track(draft: Draft): void {
@@ -169,10 +179,10 @@ export class ValueEditors {
     draft.input.classList.toggle("dirty", changed);
 
     if (changed) {
-      this.drafts.set(draft.key, draft);
+      this.drafts.set(this.draftKey(draft), draft);
     } else {
       draft.preview?.reset();
-      this.drafts.delete(draft.key);
+      this.drafts.delete(this.draftKey(draft));
     }
     this.host.changed();
     this.host.redraw();
@@ -185,9 +195,14 @@ export class ValueEditors {
       draft.slider.value = String(draft.value.value);
     }
     draft.preview?.reset();
-    this.drafts.delete(draft.key);
+    this.drafts.delete(this.draftKey(draft));
     this.host.changed();
     this.host.redraw();
+  }
+
+  /** One field: several can show one literal, and several literals can share a name. */
+  private draftKey(draft: Draft): string {
+    return `${draft.literal}|${draft.key}`;
   }
 
   /** Puts the fields and the scene back as they were. */
@@ -210,12 +225,8 @@ export class ValueEditors {
   }
 
   /**
-   * Writes every changed value to source.
-   *
-   * Last in the file first, because rewriting a literal can change its length and
-   * so move whatever follows it on the same line. Going backwards, the positions
-   * still to be used are always still right. One constant shown in two fields is
-   * one literal, so it is written once.
+   * Writes every changed value to source, in one request: all of them or none.
+   * One constant shown in two fields is one literal, so it is written once.
    */
   async saveAll(): Promise<void> {
     if (this.saving || this.drafts.size === 0) {
@@ -230,40 +241,35 @@ export class ValueEditors {
         draft.input.focus();
         return;
       }
-      edits.set(literalOf(draft.value), { draft, next: parsed.value });
+      edits.set(draft.literal, { draft, next: parsed.value });
     }
 
-    const ordered = [...edits.values()].sort(
-      (a, b) =>
-        (b.draft.value.line ?? 0) - (a.draft.value.line ?? 0) ||
-        (b.draft.value.column ?? 0) - (a.draft.value.column ?? 0)
-    );
+    const list = [...edits.values()];
 
     this.saving = true;
     const inputs = [...this.drafts.values()].map((draft) => draft.input);
     inputs.forEach((input) => (input.disabled = true));
-    let saved = 0;
 
     try {
-      for (const { draft, next } of ordered) {
-        await editSourceAt(draft.file, draft.value as never, next, draft.prop.name);
-        saved++;
-      }
+      await editSourceMany(
+        list.map(({ draft, next }) => ({
+          file: draft.file,
+          line: draft.value.line as number,
+          column: draft.value.column,
+          expected: draft.value.raw,
+          argName: draft.prop.name,
+          newValue: next,
+        }))
+      );
       this.finishSave();
-      const only = ordered[0].draft;
+      const only = list[0].draft;
       this.host.status(
         "ok",
-        `Saved ${ordered.length === 1 ? (only.value.via ?? only.prop.name) : `${ordered.length} values`}. ` +
+        `Saved ${list.length === 1 ? (only.value.via ?? only.prop.name) : `${list.length} values`}. ` +
           "Vite is updating the scene."
       );
     } catch (error) {
-      if (saved > 0) {
-        this.finishSave();
-      }
-      this.host.status(
-        "error",
-        saved > 0 ? `Saved ${saved} of ${ordered.length}. ${errorText(error)}` : errorText(error)
-      );
+      this.host.status("error", errorText(error));
     } finally {
       this.saving = false;
       inputs.forEach((input) => (input.disabled = false));

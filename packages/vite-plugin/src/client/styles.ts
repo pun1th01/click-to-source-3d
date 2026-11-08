@@ -139,7 +139,29 @@ export const STYLES = `
   color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em;
   font-size: 10.5px; margin-bottom: 6px;
 }
-.element { color: var(--muted); margin: 8px 0 4px; }
+.element { color: var(--muted); margin: 8px 0 4px; display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px; }
+.link {
+  border: 0; background: none; padding: 0; margin: 0; font: inherit; font-size: 11px;
+  color: var(--accent); cursor: pointer; text-align: left; overflow-wrap: anywhere;
+}
+.link:hover { text-decoration: underline; }
+.frame { margin: 8px 0 10px; }
+.frame-head, .use-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px; }
+.frame-head { margin-bottom: 4px; }
+.frame-head .fn, .use-head .fn { color: var(--text); font-weight: 600; }
+.frame .value.ro .readonly, .use .value.ro .readonly { padding: 3px 0; }
+.use { margin: 5px 0; }
+.use details { margin-top: 0; }
+.use summary { display: list-item; }
+.use summary .use-head { display: inline-flex; vertical-align: top; }
+.package { color: var(--muted); font-size: 11px; }
+.numbers { margin-top: 6px; }
+.number-line { margin-bottom: 8px; }
+.line-text {
+  color: var(--muted); font-size: 11px; margin-bottom: 3px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.line-no { color: var(--accent); margin-right: 6px; }
 .prop { display: grid; grid-template-columns: 92px 1fr; gap: 6px; align-items: start; margin-bottom: 5px; }
 .prop .label { color: var(--muted); padding-top: 4px; overflow: hidden; text-overflow: ellipsis; }
 .values { display: grid; grid-template-columns: repeat(auto-fit, minmax(56px, 1fr)); gap: 4px; }
@@ -184,7 +206,12 @@ summary .headline { color: var(--text); margin-left: 4px; }
 .unsaved .primary { border-color: #e0b85a; color: #e0b85a; }
 
 .agent-status { display: flex; align-items: center; gap: 7px; }
-.connect { margin-top: 6px; }
+.connect { margin-top: 10px; }
+.connect .actions { margin: 8px 0 4px; }
+.action.primary { border-color: var(--accent); color: var(--accent); }
+.action[disabled] { opacity: 0.6; cursor: default; }
+.note.on { color: var(--ok); }
+.note.bad { color: var(--error); margin-top: 6px; }
 code {
   background: rgba(255, 255, 255, 0.07); border-radius: 4px; padding: 1px 4px;
   color: var(--text); overflow-wrap: anywhere;

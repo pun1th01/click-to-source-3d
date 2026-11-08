@@ -17,6 +17,94 @@ function box() {
   return new THREE.Mesh(new THREE.BoxGeometry(1, 2, 3), new THREE.MeshStandardMaterial({ roughness: 0.5 }));
 }
 
+describe("PreviewSession, for colours", () => {
+  const colorProp = (name = "color"): StampedProp => ({
+    element: "MeshStandardMaterial",
+    name,
+    array: false,
+    values: [{ raw: '"#336699"', value: "#336699", editable: true, line: 1, column: 1 }],
+  });
+  const mesh = () =>
+    new THREE.Mesh(new THREE.BoxGeometry(), new THREE.MeshStandardMaterial({ color: "#336699" }));
+
+  it("says it is a colour, which a slider has nothing to do with", () => {
+    expect(new PreviewSession(mesh()).previewOf(colorProp(), 0)!.isColor).toBe(true);
+  });
+
+  it("takes a colour as a person would type one", () => {
+    const preview = new PreviewSession(mesh()).previewOf(colorProp(), 0)!;
+
+    expect(preview.parse("#abc")).toBe("#abc");
+    expect(preview.parse("#AABBCC")).toBe("#AABBCC");
+    expect(preview.parse("0xff0000")).toBe(0xff0000);
+    expect(preview.parse("tomato")).toBe("tomato");
+  });
+
+  it("waits for something that is one", () => {
+    const preview = new PreviewSession(mesh()).previewOf(colorProp(), 0)!;
+
+    for (const text of ["", "#", "#ab", "#abcd", "nope", "-1", "1.5", "99999999"]) {
+      expect(preview.parse(text)).toBeNull();
+    }
+  });
+
+  // A colour has setScalar too, which is how `color: 0xff0000` turned grey.
+  it("sets the colour, not a shade of grey", () => {
+    const object = mesh();
+    const preview = new PreviewSession(object).previewOf(colorProp(), 0)!;
+    const color = (object.material as THREE.MeshStandardMaterial).color;
+
+    preview.set(0xff0000);
+    expect(color.getHexString()).toBe("ff0000");
+    preview.set("#00ff00");
+    expect(color.getHexString()).toBe("00ff00");
+    preview.reset();
+    expect(color.getHexString()).toBe("336699");
+  });
+});
+
+describe("PreviewSession, for what plain three.js writes", () => {
+  it("moves one axis named with a dash", () => {
+    const object = new THREE.Mesh();
+    const preview = new PreviewSession(object).previewOf(prop("Mesh", "rotation-y", [1], false), 0)!;
+
+    preview.set(2);
+    expect(object.rotation.y).toBe(2);
+  });
+
+  it("has nothing to show for a compound assignment or a method call", () => {
+    const session = new PreviewSession(new THREE.Mesh());
+
+    expect(session.previewOf(prop("Mesh", "rotation-y +=", [0.01], false), 0)).toBeNull();
+    expect(session.previewOf(prop("Mesh", "rotateX()", [1]), 0)).toBeNull();
+  });
+
+  it("rebuilds a geometry written as a class", () => {
+    const object = new THREE.Mesh(new THREE.BoxGeometry(1, 2, 3));
+    const preview = new PreviewSession(object).previewOf(prop("BoxGeometry", "args", [1, 2, 3]), 0)!;
+
+    expect(preview.paramName).toBe("width");
+    preview.set(5);
+    expect((object.geometry as THREE.BoxGeometry).parameters.width).toBe(5);
+  });
+
+  // Terrain moves its vertices after the constructor, which the parameters don't say.
+  it("won't rebuild a geometry that has been changed since", () => {
+    const geometry = new THREE.PlaneGeometry(10, 10, 4, 4);
+    geometry.attributes.position.setZ(3, 2);
+    const object = new THREE.Mesh(geometry);
+
+    expect(new PreviewSession(object).previewOf(prop("PlaneGeometry", "args", [10, 10, 4, 4]), 0)).toBeNull();
+    expect(object.geometry).toBe(geometry);
+  });
+
+  it("won't rebuild one with a rotation baked in", () => {
+    const object = new THREE.Mesh(new THREE.PlaneGeometry(10, 10).rotateX(-Math.PI / 2));
+
+    expect(new PreviewSession(object).previewOf(prop("PlaneGeometry", "args", [10, 10]), 0)).toBeNull();
+  });
+});
+
 describe("PreviewSession", () => {
   describe("the object's own props", () => {
     it("moves one axis of position={[...]}, and puts it back", () => {

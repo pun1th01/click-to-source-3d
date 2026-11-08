@@ -1,6 +1,7 @@
 import { parse } from "@babel/parser";
 import MagicString from "magic-string";
 import type { EditRequest, SourceEditErrorCode } from "@click-to-source-3d/shared";
+import { pluginsFor } from "./trace/facts.js";
 
 export class SourceEditError extends Error {
   readonly code: SourceEditErrorCode;
@@ -373,6 +374,17 @@ function findLiteralAt(
   return found;
 }
 
+/** A new value written the way the old one was, so a colour stays `0x88aa55`. */
+function hexLike(expected: string, value: unknown): string | null {
+  const match = /^0[xX]([0-9a-fA-F]+)$/.exec(expected);
+  if (!match || typeof value !== "number" || !Number.isInteger(value) || value < 0) {
+    return null;
+  }
+  const digits = value.toString(16).padStart(match[1].length, "0");
+  const upper = /[A-F]/.test(match[1]) && !/[a-f]/.test(match[1]);
+  return `${expected.slice(0, 2)}${upper ? digits.toUpperCase() : digits}`;
+}
+
 /**
  * Rewrites the literal at an exact position, if it still reads `expected`.
  *
@@ -411,15 +423,53 @@ function editAtPosition(source: string, ast: BabelNode, request: EditRequest): s
   const replacement =
     hit.node.type === "StringLiteral" && hit.parent?.type === "JSXAttribute"
       ? serializeJsxAttributeString(request.newValue)
-      : serializeValue(request.newValue);
+      : (hexLike(expected, request.newValue) ?? serializeValue(request.newValue));
 
   const magicString = new MagicString(source);
   magicString.overwrite(range.start, range.end, replacement);
   return magicString.toString();
 }
 
+/**
+ * Rewrites a literal in a script written in a page, which is no use to a JavaScript
+ * parser as a whole. The position and the text came from parsing that script when
+ * it was served, and the text has to still be there.
+ */
+function editInPage(source: string, request: EditRequest): string {
+  const { line, column, expected } = request;
+  if (column === undefined || !expected) {
+    throw new SourceEditError("INVALID_REQUEST", "A page's values can only be edited by position");
+  }
+
+  let offset = 0;
+  for (let current = 1; current < line; current++) {
+    const next = source.indexOf("\n", offset);
+    if (next < 0) {
+      offset = -1;
+      break;
+    }
+    offset = next + 1;
+  }
+  const start = offset < 0 ? -1 : offset + column - 1;
+
+  if (start < 0 || !source.startsWith(expected, start)) {
+    throw new SourceEditError(
+      "STALE_LOCATION",
+      `Line ${line}, column ${column} of ${request.file} no longer reads ${expected}. The file has ` +
+        "changed since the inspector read it; select the object again."
+    );
+  }
+
+  const replacement = hexLike(expected, request.newValue) ?? serializeValue(request.newValue);
+  return source.slice(0, start) + replacement + source.slice(start + expected.length);
+}
+
 export function editSource(source: string, request: EditRequest): string {
   const byPosition = request.column !== undefined;
+
+  if (typeof request.file === "string" && /\.html?$/.test(request.file)) {
+    return editInPage(source, request);
+  }
 
   if (
     typeof source !== "string" ||
@@ -443,7 +493,7 @@ export function editSource(source: string, request: EditRequest): string {
     ast = parse(source, {
       sourceFilename: request.file,
       sourceType: "module",
-      plugins: ["jsx", "typescript"],
+      plugins: pluginsFor(request.file),
     }) as unknown as BabelNode;
   } catch (error) {
     const message = error instanceof Error ? error.message : "unknown parse error";
