@@ -144,11 +144,83 @@ export type StampedValue = {
  * element for an array literal such as `position={[0, 1, 2]}`.
  */
 export type StampedProp = {
-  /** The element the prop is written on: `mesh`, `boxGeometry`, … */
+  /** The element the prop is written on: `mesh`, `BoxGeometry`, … */
   element: string;
   name: string;
   array: boolean;
   values: StampedValue[];
+  /**
+   * The file the values are in, when an object is described along with parts
+   * that came from elsewhere, such as a geometry built in another module.
+   */
+  file?: string;
+};
+
+/** The numbers on one line of a function, with the line for context. */
+export type SourceNumbers = {
+  line: number;
+  /** The line as written, trimmed and shortened. */
+  text: string;
+  values: StampedValue[];
+};
+
+/** Which argument a function parameter takes its value from. */
+export type SourceParam = {
+  /** `...rest`: one argument at the call is only the first of what it holds. */
+  rest?: boolean;
+  name: string;
+  /** Position in the call. */
+  arg: number;
+  /** The property of that argument, for a destructured parameter. */
+  key?: string;
+};
+
+/** A function a generator calls: its helpers, such as a noise function. */
+export type UsedFunction = {
+  name: string;
+  /** How deep in the chain of helpers: 0 is called by the generator itself. */
+  depth: number;
+  /** Absent for a function from a package, which has `package` instead. */
+  file?: string;
+  line?: number;
+  column?: number;
+  /** The package it comes from, when it isn't project code. */
+  package?: string;
+  params?: string[];
+  numbers?: SourceNumbers[];
+};
+
+/**
+ * The function that made an object, as the build step read it: what it takes,
+ * the numbers in it, and the helpers it calls.
+ */
+export type SourceFunction = {
+  /** `file:line:column`, which a call site names to say what it is calling. */
+  id: string;
+  name: string;
+  file: string;
+  line: number;
+  column?: number;
+  params: SourceParam[];
+  numbers: SourceNumbers[];
+  uses: UsedFunction[];
+};
+
+/**
+ * One call in the chain that led to an object being made.
+ *
+ * Unlike everything else here this is recorded as the code runs, so `args`
+ * holds what was really passed. An argument written as a literal at the call
+ * site also has its position, which is what makes it editable.
+ */
+export type TraceFrame = {
+  name: string;
+  file: string;
+  line: number;
+  column?: number;
+  args: Array<{ name: string; value: string; literal?: StampedValue }>;
+  /** Where the call was made, when the caller is project code. */
+  calledAt?: { file: string; line: number; column?: number };
 };
 
 /**
@@ -164,9 +236,22 @@ export type SourceStamp = {
   file: string;
   function: string;
   line: number;
-  /** 1-based column of the element's opening `<`. */
+  /** 1-based column of the element's opening `<`, or of the `new`. */
   column?: number;
   props?: StampedProp[];
+  /** The class as written at the site: `Mesh`, `Tree`, `GLTFLoader`. */
+  creates?: string;
+  /** How the site makes it. Absent for a JSX element. */
+  how?: "new" | "clone" | "load";
+  /** What the build step read about the enclosing function. */
+  generator?: SourceFunction;
+};
+
+/** What is known about one object that isn't written on the object itself. */
+export type ObjectRecord = {
+  stamp: SourceStamp;
+  /** The calls that led to it, outermost first. */
+  trace: TraceFrame[];
 };
 
 /**
@@ -177,29 +262,14 @@ export type SourceStamp = {
  */
 export type PartialSourceRef = Partial<SourceRef>;
 
-/**
- * Bridge transport paths.
- *
- * Three channels rather than a WebSocket. A socket would be the obvious
- * choice for request/response, but the only usable server implementation
- * would be a new dependency in `@click-to-source-3d/vite-plugin`, which
- * otherwise carries three. The lifecycle that matters here — close observed
- * before reconnect on a full reload — was measured on this transport and is
- * the same either way.
- */
-export const BRIDGE_EVENTS_PATH = "/__cts/bridge/events";
-export const BRIDGE_REPLY_PATH = "/__cts/bridge/reply";
+/** Where a program on this machine asks the open page a question. */
 export const BRIDGE_QUERY_PATH = "/__cts/bridge/query";
 
 /**
- * Bridge events on Vite's own HMR websocket, the transport the injected
- * inspector uses.
+ * Bridge events on Vite's own HMR websocket.
  *
  * That socket is already open to every page Vite serves, so riding on it
- * costs nothing per tab — unlike the EventSource above, which holds an extra
- * HTTP connection open and, over HTTP/1.1, counts against the browser's limit
- * of six per host. The three paths above remain for `<ClickToSourceBridge />`
- * until 0.2.0.
+ * costs nothing per tab.
  *
  * A page announces itself with HELLO, receives questions as QUERY, and
  * answers each with REPLY carrying the same `requestId`.
@@ -378,6 +448,17 @@ export type PointedObject = {
   /** Each material's type and colour: `MeshStandardMaterial #c2643c`. */
   materials: string[];
   cost: ObjectCost | null;
+  /** The calls that led to this object, with the values they were given. */
+  trace: TraceFrame[];
+  /**
+   * The functions that made it: its own first, then its geometry's and material's
+   * where those were made elsewhere. Their parameters, numbers and helpers.
+   */
+  generators: SourceFunction[];
+  /** How the object was made: `new`, `clone` or `load`. Null for JSX. */
+  how: "new" | "clone" | "load" | null;
+  /** Where it sits inside what its source made, such as a loaded model: `Sword › Blade`. */
+  modelPath: string | null;
 };
 
 /** What a page publishes as AGENT_SELECTION_EVENT. */
@@ -387,3 +468,97 @@ export type PageSelection = {
   /** The object open in the inspector's panel, if any. */
   selected: PointedObject | null;
 };
+
+/** Where the inspector asks whether the assistant tools are set up, and sets them up. */
+export const MCP_SETUP_PATH = "/__cts/mcp";
+
+/** What a project's MCP configuration says about this server. */
+export type McpSetupStatus = {
+  /** The folder the files are in, by name: where to start the assistant. */
+  folder: string;
+  /** Files that register the server, relative to that folder. */
+  registered: string[];
+  /** What a request to set it up wrote just now. */
+  written: string[];
+  /** Files that couldn't be edited, and why. Left for a person to fix. */
+  problems: Array<{ file: string; reason: string }>;
+  /** The assistant this project shows signs of, if any. */
+  assistant: string | null;
+};
+
+export const MCP_SERVER_NAME = "click-to-source";
+export const MCP_PACKAGE = "@click-to-source-3d/mcp";
+
+/**
+ * The entry that starts the MCP server, for an assistant's config file.
+ *
+ * `npx -y <package>` runs the copy installed in the project when there is one,
+ * and fetches it otherwise, so the entry works from the repository root of a
+ * monorepo whose app is further down. On Windows, MCP clients spawn commands
+ * without a shell, and npx is a .cmd script there, so it goes through `cmd /c`.
+ */
+export function mcpServerEntry(platform: string): { command: string; args: string[] } {
+  const run = ["npx", "-y", MCP_PACKAGE];
+  return platform === "win32"
+    ? { command: "cmd", args: ["/c", ...run] }
+    : { command: run[0], args: run.slice(1) };
+}
+
+export type McpMergeResult =
+  | { status: "added"; text: string }
+  | { status: "already" }
+  | { status: "invalid"; reason: string };
+
+/**
+ * Adds the server to an MCP config file's text, or starts one.
+ *
+ * An existing entry of the same name is left as it is: the developer may have
+ * changed it. A file that isn't valid JSON is never rewritten; the caller says
+ * what to add by hand instead. `vscode` is VS Code's own format, which calls the
+ * list `servers` and wants each entry to say how it is reached.
+ */
+export function mergeMcpConfig(
+  existing: string | null,
+  platform: string,
+  format: "standard" | "vscode" = "standard"
+): McpMergeResult {
+  const key = format === "vscode" ? "servers" : "mcpServers";
+  let config: Record<string, unknown> = {};
+
+  if (existing !== null && existing.replace(/^\uFEFF/, "").trim() !== "") {
+    try {
+      config = JSON.parse(existing.replace(/^\uFEFF/, "")) as typeof config;
+    } catch (error) {
+      return { status: "invalid", reason: (error as Error).message };
+    }
+    if (typeof config !== "object" || config === null || Array.isArray(config)) {
+      return { status: "invalid", reason: "it is not a JSON object" };
+    }
+  }
+
+  const servers = config[key] ?? {};
+  if (typeof servers !== "object" || servers === null || Array.isArray(servers)) {
+    return { status: "invalid", reason: `its "${key}" is not an object` };
+  }
+  if (MCP_SERVER_NAME in servers) {
+    return { status: "already" };
+  }
+
+  const entry = mcpServerEntry(platform);
+  config[key] = {
+    ...servers,
+    [MCP_SERVER_NAME]: format === "vscode" ? { type: "stdio", ...entry } : entry,
+  };
+  return { status: "added", text: `${JSON.stringify(config, null, 2)}\n` };
+}
+
+/** Whether an MCP config file's text registers the server. */
+export function registersMcpServer(text: string, format: "standard" | "vscode" = "standard"): boolean {
+  try {
+    const config = JSON.parse(text.replace(/^\uFEFF/, "")) as Record<string, unknown>;
+    const servers = config?.[format === "vscode" ? "servers" : "mcpServers"];
+    return typeof servers === "object" && servers !== null && MCP_SERVER_NAME in servers;
+  } catch {
+    return false;
+  }
+}
