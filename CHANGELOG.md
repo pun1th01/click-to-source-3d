@@ -2,6 +2,115 @@
 
 All packages are versioned in lockstep.
 
+## 0.2.0 — unreleased
+
+The plugin now works with plain three.js, with nothing tagged by hand, and setting it up is one
+command with nothing to do afterwards. This is the first version to support both three.js and
+React Three Fiber.
+
+### Plain three.js
+
+- **Click any mesh and see the line that made it.** `new` anywhere in your project, in functions,
+  classes, class fields and top-level code, in JavaScript and TypeScript, across files. Your objects
+  have nothing added to them: not `userData`, and nothing in `toJSON()` or GLTFExporter's output.
+- **Called from.** The calls that led to the object, with the values they were really given. An
+  argument written as a literal can be edited from there, in whichever file the call is.
+- **Uses.** The helpers behind the object, nested as they call each other: your noise function, what
+  that calls, and functions from packages such as `simplex-noise` and three's own `ImprovedNoise`.
+  Their numbers can be edited in their own files. What a function makes itself isn't listed: a ground
+  plane doesn't "use" the rocks made on the next line.
+- **Numbers.** Every other number in the function, by line. In top-level code, which has no function,
+  the statements that use what the object was made from, so a loop that moves a geometry's vertices counts.
+- **Properties, wherever they're written.** The arguments and options of its geometry and material,
+  and what is set on the object afterwards: `position.set(...)`, `rotation.y = ...`, `scale.setScalar(...)`,
+  even `cube.rotation.x += 0.01` in a loop at the other end of the file.
+- **Clones and loaded models.** `mesh.clone()` is found where it was cloned. A click on part of a model is
+  found at the `load`, `loadAsync` or `parse` that loaded it, and says which part. Selecting one survives a reload.
+- **Scripts in a page.** `<script type="module">` is found at its line in the HTML file, and edited there.
+- **Costs nothing it doesn't have to.** Math types aren't touched, so a tight loop is as fast as it was, and
+  none of this reaches a build, a server render or a test runner.
+
+### One command
+
+`npx click-to-source-3d init` used to refuse or hand work back in several common cases. It no longer does:
+
+- **No Vite config**, as `create-vite`'s vanilla template leaves you: it creates one.
+- **No build tool, or no `package.json`:** it installs Vite and whatever else is missing, including the version
+  of three.js your CDN link or import map names, and adds a `dev` script and, if needed, a page.
+- **A monorepo's root, or a folder inside the app:** it finds the apps that use three.js and sets up each one.
+- **Any config with an `export default`:** functions with several returns, `mergeConfig`, spreads and configs
+  from other files are wrapped in the new `withClickToSource()`. `module.exports` works too.
+- **An AI assistant in use:** its tools are set up without asking, including `.cursor/mcp.json` and
+  `.vscode/mcp.json` where those folders exist.
+- **A package manager that isn't installed:** it runs through `npx`.
+- **Vite 5, three.js 0.150 and React Three Fiber 8** are now supported.
+
+It also says clearly when it can't help: webpack, Next.js and others change nothing, and neither does a Vite older than 5
+or a three.js older than 0.150, for which it gives the command that updates them.
+
+### The inspector, for everyone
+
+- **A click means what you can see.** It no longer finds meshes whose material draws nothing, sees the layers your
+  camera sees, and a line or a point has to be within a few pixels. A `GridHelper` used to take every click within
+  a world unit of it.
+- **Clicks reach the scene through a layer on top of the canvas**, such as `CSS2DRenderer`'s, while a control on
+  the page keeps its click.
+- **Colours preview as you type them.** Before, a colour written as a number previewed as a shade of grey, because
+  a colour has `setScalar` too.
+- **Saving is all or nothing.** Several values go in one request, across any number of files, and if one is refused
+  none is written. A save could otherwise be cut short by the page reload its first file caused.
+- **Hex stays hex.** `0x88aa55` changed to red is written as `0xff0000`, not `16711680`.
+- **`.ts` files parse as TypeScript**, not as JSX, where `<number>x` and `<T>(a) => a` are syntax errors.
+- **The highlight's colours aren't changed by the application's tone mapping.**
+- **A directive with no semicolon** (`"use client"` on its own line) no longer breaks the module.
+- **Parts of an object stay selected through a reload.**
+- **No errors in the console from clicking after the dev server has stopped.** Each click used to log one.
+- **`WebGPURenderer` is found**, including through `renderAsync`, and through versions of three that don't announce it.
+  So far this has only been tried through its WebGL backend.
+
+### Turning on the MCP server from the panel
+
+The Agent tab has a **Turn on MCP server** button. It registers the server where your
+assistant reads its config, as `npx click-to-source-3d init --mcp` does, and then says how
+to start the assistant. It doesn't need a terminal. Your assistant still starts the server
+itself, so a running one has to be restarted to see it.
+
+### Found by a checkup
+
+The new code was run over all of three.js's own add-ons and source, over a thousand
+files, and a sample of add-ons was run before and after with identical results. These
+were found by that, by review, and by repeating the browser tests:
+
+- **A name now means what it means where it is written.** A parameter called `onLoad` was
+  taken for a function called `onLoad` elsewhere in the file, which could list a helper
+  that isn't used, or offer the literal of another call to edit.
+- **A call that never arrives leaves nothing behind.** If an argument threw, its note was
+  left for a later call to the same function to take.
+- **Arguments after a spread aren't matched to parameters**, a `...rest` parameter isn't
+  offered as its first value, and an object's keys before a spread in it aren't trusted.
+- **Nothing recorded can make the application's own call fail**, whatever it is passed: a
+  value is described without running its getters, and a proxy whose traps throw is fine.
+- **A save never loses track of the project.** Saving writes a temporary file, and its
+  coming and going could make the next reload serve a module without its records.
+- **Scripts in a page saved with Windows line endings** are read, as they weren't before.
+- **A colour typed either way round is saved the way the code wrote it.** `#ff0000` for
+  `0x88aa55` used to be refused, and `0xff0000` for `"#88aa55"` saved a colour three can't read.
+- **`<primitive object={...}>`** shows where plain code made the object, and what it set on it.
+- **A helper is listed once** in a report and in a comparison.
+- **The Agent tab is current when shown**, rather than when something else changed.
+- **`init` won't replace a `package.json` it can't read**, keeps its indent and line endings
+  when it adds a script, and escapes a folder's name in a page it writes.
+
+### Upgrading
+
+Nothing changes in your config or your app, unless you still have one of these, which were already deprecated or
+unused and are now gone:
+
+- The `captureInstances` option.
+- `<ClickToSourceBridge />` in `@click-to-source-3d/overlay`, and `connectBridge`. The plugin has done this since 0.1.5.
+- `@click-to-source-3d/core/probe`, `installInstanceProbe` and `getProbeStats`. Instances have been read live since 0.1.5.
+- The endpoints `/__cts/bridge/events` and `/__cts/bridge/reply`, which only those used.
+
 ## 0.1.6
 
 Point at what you mean, and watch your assistant work. Mark one or more meshes in

@@ -5,8 +5,9 @@
 [![CI](https://github.com/pun1th01/click-to-source-3d/actions/workflows/ci.yml/badge.svg)](https://github.com/pun1th01/click-to-source-3d/actions/workflows/ci.yml)
 [![MIT license](https://img.shields.io/github/license/pun1th01/click-to-source-3d?color=3cc2b8)](LICENSE)
 
-**Click any mesh in your React Three Fiber (three.js) scene to see the line of
-code that created it, and change its values right there.**
+**Click any mesh in your three.js or React Three Fiber scene to see the line of
+code that made it, the calls that led there, and the helpers it used, such as a
+noise function. Then change its values right there.**
 
 It works like DevTools' "Inspect Element", but for 3D. It's a Vite plugin that
 takes one command to set up, with nothing to add to your code: no imports, no
@@ -17,7 +18,7 @@ so you can point at a mesh and tell them what to change.
 npx click-to-source-3d init
 ```
 
-![The Click-to-Source 3D inspector panel for a mesh in a React Three Fiber scene, showing the line of code it came from and its values as editable fields](docs/assets/inspector-panel.png)
+![The inspector on a terrain made by plain three.js code: the line that made it, the calls that led there with their values, its geometry and material, and the noise function behind it](docs/assets/inspector-three.png)
 
 **On this page**
 
@@ -35,60 +36,69 @@ npx click-to-source-3d init
 
 ### What you need
 
-A React Three Fiber app that runs on Vite:
-
 | | version |
 |---|---|
 | Node.js | 20.19 or later |
-| Vite | 6, 7 or 8 |
-| React Three Fiber | 9 |
-| three.js | 0.170 or later |
+| three.js | 0.150 or later |
+| React Three Fiber, if you use it | 8 or 9 |
+| Vite | 5, 6, 7 or 8. If you have no build tool yet, `init` adds Vite for you. |
 
-### Three steps
+### Two steps
 
-**1. Set it up.** Open a terminal in your app's folder, the one with
-`package.json` and `vite.config`, and run:
+**1. Set it up.** Open a terminal in your project and run:
 
 ```bash
 npx click-to-source-3d init
 ```
 
-It asks one question: whether to set up the tools for AI assistants. If you
-don't use one, press Enter to skip it. You can [add them later](#1-connect-your-assistant).
-
-**2. Start your app** the way you normally do:
+There is nothing to edit afterwards, and nothing to add to your code. It tells you
+the command that starts your app, which is usually:
 
 ```bash
 npm run dev
 ```
 
-**3. Open the app in your browser** and press **Alt+Shift+C**. Click any object.
+**2. Open the app in your browser** and press **Alt+Shift+C**. Click any object.
 
 That's it. The panel opens and shows where the object came from.
 
-### What `init` changed
+### What `init` does
 
-- It installed `@click-to-source-3d/vite-plugin` as a dev dependency, using your
-  project's package manager (npm, pnpm, yarn or bun).
-- It added `clickToSource()` to the `plugins` in your `vite.config`. Nothing else
-  in the file changes.
-- If you said yes to the question, it also set up the assistant tools.
+It looks at what you have, and does whatever is missing:
 
-Running it again is safe, and changes nothing. `npx` works with any package
-manager. If you prefer, `pnpm dlx click-to-source-3d init` and
-`bunx click-to-source-3d init` do the same.
+| what it finds | what it does |
+|---|---|
+| A Vite project with a config | Adds the plugin to the config, whatever shape the config is |
+| A Vite project with no config, as `create-vite` makes | Creates `vite.config.js` |
+| three.js and no build tool | Installs Vite, adds a `dev` script, creates the config |
+| A folder of scripts with no `package.json` | Creates one, and installs the version of three.js your CDN link or import map names |
+| Scripts but no `index.html` | Creates a page that loads your entry file |
+| A monorepo's root, or a folder inside your app | Finds the apps that use three.js and sets up each one |
+| Signs of an AI assistant (`.claude`, `CLAUDE.md`, `.mcp.json`, `.cursor`, `.windsurf`) | [Sets up its tools](#1-connect-your-assistant) without asking |
+| A package manager that isn't installed | Runs it through `npx` |
+
+Otherwise it asks one question: whether to set up the tools for AI assistants. If
+you don't use one, press Enter to skip it.
+
+It uses your project's package manager (npm, pnpm, yarn or bun). Running it again is
+safe, and changes nothing. If it finds webpack, Next.js or another build tool it
+doesn't support yet, or a version of Vite or three.js that's too old, it says so,
+with the command that updates it if there is one, and changes nothing.
+
+`npx` works with any package manager. If you prefer, `pnpm dlx click-to-source-3d init`
+and `bunx click-to-source-3d init` do the same.
 
 | `init` option | what it does |
 |---|---|
 | `--mcp` | Sets up the assistant tools without asking |
-| `--no-mcp` | Skips the question |
+| `--no-mcp` | Doesn't set them up, or ask |
 | `-y`, `--yes` | Accepts the defaults without asking |
-| `--force` | Sets up a project that doesn't use React Three Fiber |
+| `--force` | Sets up a project that doesn't seem to use three.js |
 
 ### Setting it up by hand
 
-If `init` can't edit your config safely, it prints what to add instead. This is
-all it does. Install the plugin:
+You shouldn't need to: the only config `init` can't edit is one that exports
+nothing, and it prints what to add. This is all it does. Install the plugin:
 
 ```bash
 npm install -D @click-to-source-3d/vite-plugin
@@ -96,22 +106,31 @@ npm install -D @click-to-source-3d/vite-plugin
 
 With another package manager, use `pnpm add -D`, `yarn add -D` or `bun add -d`.
 
-Then add it to `plugins` in your Vite config, before or after `react()`:
+Then add it to `plugins` in your Vite config:
 
 ```js
 // vite.config.js (or .ts)
 import { defineConfig } from 'vite';
-import react from '@vitejs/plugin-react';
 import { clickToSource } from '@click-to-source-3d/vite-plugin';
 
 export default defineConfig({
-  plugins: [clickToSource(), react()],
+  plugins: [clickToSource()],
 });
+```
+
+A config with no single `plugins` list to add to, such as a function that returns
+different things, or one built by `mergeConfig`, can be wrapped instead:
+
+```js
+import { withClickToSource } from '@click-to-source-3d/vite-plugin';
+
+export default withClickToSource(whateverYouHadBefore);
 ```
 
 ### Try it without a project of your own
 
-The repository has a small example scene:
+The repository has two small example scenes, one in plain three.js and one in
+React Three Fiber, with nothing added but the plugin:
 
 ```bash
 git clone https://github.com/pun1th01/click-to-source-3d.git
@@ -127,6 +146,10 @@ npm ci
 
 ```bash
 npm run build
+```
+
+```bash
+npm run dev -w @click-to-source-3d/examples-three
 ```
 
 ```bash
@@ -167,19 +190,58 @@ and line.
 
 ![Hovering the sphere in inspect mode shows its file and line](docs/assets/inspector-hover.png)
 
-Click it. The **Inspect** tab shows the component and line that created it. Press
+Click it. The **Inspect** tab shows the function and line that made it. Press
 **Open** to jump to that line in your editor.
+
+### See how it got there
+
+In plain three.js, **Called from** lists the calls that led to the object, nearest
+first, with the values they were really given:
+
+```text
+createTerrain   src/world.js:9
+  size    40      TERRAIN_SIZE · line 6
+  seed    7
+buildWorld      src/main.js:23
+  scene   <Scene>
+  seed    7
+```
+
+An argument written as a number or a string where the function is called can be
+edited right there, wherever that is. One passed along from another function shows
+what it was, and the literal is in the frame it came from.
+
+### See what made it
+
+**Uses** lists the helpers behind the object, nested as they call each other, whether
+they are yours or come from a package. The numbers inside each are one click away:
+
+```text
+fbm(x, y, octaves)   src/noise.js:21
+  valueNoise(x, y)   src/noise.js:10
+    smooth(t)        src/noise.js:6
+    hash(x, y)       src/noise.js:1
+createNoise2D        simplex-noise
+```
+
+**Numbers** lists every other number in the function that made it, with the line it's
+on, so `fbm(x * 0.08, z * 0.08) * 6` is three fields you can change. Top-level code has no
+function to look in, so there it means the statements that use what the object was
+made from: the loop that moves a geometry's vertices with a noise function counts.
 
 ### Change a value
 
-The panel lists the values written on the object, and on the geometry and material
-inside it: `position={[0, 1, 2]}`, `args={[1.2, 2, 1.2]}`, `color="#c2643c"`.
+The panel lists the values written for the object, its geometry and its material, wherever
+they are written: `new THREE.BoxGeometry(1, 2, 1)`, `{ color: "#c2643c", roughness: 0.5 }`,
+`mesh.position.set(0, 1, 2)`, `cube.rotation.y += 0.01` in your animation loop, or in JSX,
+`position={[0, 1, 2]}` and `args={[1.2, 2, 1.2]}`.
 
 1. **Drag a slider**, or type a new value. The scene changes straight away, and
-   your source file doesn't change yet.
+   your source file doesn't change yet. Colours work the same way as you type them.
 2. **Press Enter**, or **Save** in the bar at the bottom of the panel. Every changed
-   value is written to your source, with your formatting untouched, and Vite
-   hot-reloads it.
+   value is written to your source at once, in any number of files, with your formatting
+   untouched, and Vite reloads it. In plain three.js that's a full page reload, and
+   your selection comes back.
 3. **Changed your mind?** Press **Revert**, press Esc in the field, or select
    something else, and it all goes back.
 
@@ -195,7 +257,17 @@ Good to know:
 - **Sliders only reach so far.** Their range is a guess from the value's name and
   size. You can type any number you like.
 - **Your edit can't land in the wrong place.** If the file has changed since the
-  panel read it, the edit is refused and the panel says so.
+  panel read it, the edit is refused and the panel says so, and nothing is written.
+- **Hex stays hex.** `0x88aa55` changed to red is written as `0xff0000`.
+- **Some values only show once saved.** Numbers in a loop or a helper can't be shown
+  until the code runs again, so they have a field and no slider. So does a geometry whose
+  vertices your code moved after making it, since rebuilding it would lose what you did.
+
+### Clones and loaded models
+
+A `mesh.clone()` is found at the line that cloned it. A click on part of a loaded model
+is found at the `loader.load()` that loaded it, and the panel says which part it is:
+`Part of a model loaded here: Sword › Blade`. Both also work for `loadAsync` and `parse`.
 
 ### One instance of an InstancedMesh
 
@@ -250,15 +322,26 @@ see your running scene. Point at the meshes you mean, then tell it what to do.
 
 ### 1. Connect your assistant
 
-Answer yes when `init` asks, or run this at any time:
+Open the inspector's **Agent** tab and press **Turn on MCP server**. Then start your
+assistant in that folder, or restart it if it's already running, and allow
+click-to-source when it asks. The tab says when it's connected.
+
+The button only registers the server: your assistant is what starts it, so that step
+can't be done from the page. You can do the same from a terminal, at any time:
 
 ```bash
 npx click-to-source-3d init --mcp
 ```
 
+If your project already has signs of an assistant, such as a `.claude` folder or a
+`CLAUDE.md`, plain `init` has already done this.
+
 **Using Claude Code?** That's all. `init` registers the tools in `.mcp.json` at the
 root of your repository. Claude Code asks you to approve them the first time it starts
 in the project.
+
+**Using Cursor or VS Code?** `init` also writes `.cursor/mcp.json` or `.vscode/mcp.json`
+when those folders exist.
 
 **Using something else?** Add this to its own config file:
 
@@ -311,7 +394,7 @@ Go to your assistant and type as you normally would:
 > move the second one next to the first
 
 It knows exactly which objects you mean, with the file, line and every editable value
-of each.
+of each, the calls that led to them and the helpers they used.
 
 ### 5. Watch what it does
 
@@ -368,6 +451,22 @@ The [plugin's README](packages/vite-plugin/) has the details.
 
 ## Upgrading
 
+### From 0.1.6
+
+Update the plugin, and the assistant tools if you use them. Nothing changes in your
+config or your app.
+
+```bash
+npm install -D @click-to-source-3d/vite-plugin@latest @click-to-source-3d/mcp@latest
+```
+
+These old things were removed, so if you still have them, delete them first:
+
+- The `captureInstances` option to `clickToSource()`, which already did nothing.
+- `<ClickToSourceBridge />` from `@click-to-source-3d/overlay`. The plugin has done its
+  job since 0.1.5.
+- `@click-to-source-3d/core/probe` and `installInstanceProbe`. Instances are read live.
+
 ### From 0.1.5
 
 Update the plugin, and the assistant tools if you use them. The two need to be on the
@@ -390,8 +489,7 @@ npm install -D @click-to-source-3d/vite-plugin@latest @click-to-source-3d/mcp@la
 
 3. **Remove the old wiring.** Delete `<SelectionHighlight />`, `<GenerationTrace />`,
    `<ClickToSourceBridge />`, your click handler and `onPointerMissed`, then uninstall
-   the old package. Until you do, they keep working next to the built-in inspector,
-   and the console says once that they can go.
+   the old package.
 
    ```bash
    npm uninstall @click-to-source-3d/overlay
@@ -437,14 +535,19 @@ only and **Image** isn't available.
 **Open starts the wrong editor.** Set the `LAUNCH_EDITOR` environment variable before
 starting the dev server, for example to `code`, `cursor` or `webstorm`.
 
-**An object shows "No source found".** A library component, such as drei's `<Box>`, or
-code that isn't JSX created it. The panel names its parents so you can find the nearest
-element of yours.
+**An object shows "No source found".** Something other than your code made it: a library, or a
+page's classic script. The panel names its parents so you can find the nearest thing of yours.
+
+**Setup says it found no three.js project.** Run it in the folder with your app, or the root of your
+monorepo. If you haven't written any three.js yet, add `--force`.
+
+**My app stopped working after setup.** Please [open an issue](https://github.com/pun1th01/click-to-source-3d/issues/new/choose).
+Meanwhile, `clickToSource({ stampSource: false })` turns off everything that touches your code.
 
 ## Removing it
 
-Delete `clickToSource()` and its import from your Vite config, then uninstall the
-plugin:
+Delete `clickToSource()` and its import from your Vite config (or `withClickToSource`, if
+that's what `init` used), then uninstall the plugin:
 
 ```bash
 npm uninstall @click-to-source-3d/vite-plugin
@@ -455,17 +558,40 @@ the `click-to-source` entry from `.mcp.json`.
 
 ## Limits worth knowing
 
-**React Three Fiber on Vite only, for now.** Plain three.js, with nothing tagged by hand,
-is the next milestone (`0.2.0`). webpack and Next.js are on the roadmap.
+**Vite only, for now.** webpack and Next.js are on the roadmap. So are Astro and Nuxt, which
+use Vite but keep its config in a file of their own.
 
-**What counts as an element is a lowercase JSX tag.** `<mesh>`, `<group>`,
+**Not everything is on the call stack.** `async` functions and generators leave it at their first
+pause, so they don't appear in **Called from**. What they make is still found, at its own line.
+
+**Uses and Called from come from reading your code.** A call through a variable holding a function, or
+a callback passed around, can't always be followed. When it can't, the helper isn't listed. Nothing is
+ever wrong as a result, only missing.
+
+**Your code is served slightly changed in development.** Each `new` and each call to a function that
+makes objects gets a small record around it, on the same line. Your files aren't touched, your objects
+have nothing added, and none of it reaches a build. Math types, such as `Vector3`, are skipped, so a
+tight loop costs nothing extra.
+
+**Classic scripts can't be read.** A `<script src="...">` with no `type="module"` can't import anything,
+so what it makes is highlighted, but shows no source. A script written inside the page with
+`type="module"` works, and is edited in the page.
+
+**Vue and Svelte components aren't read yet.** Three.js code in a `.vue` or `.svelte` file shows no
+source, though the `.js` and `.ts` files they import do.
+
+**WebGPU has only been tried through its WebGL backend.** `WebGPURenderer` is found and picked, but no
+test here has run on a real GPU.
+
+**What counts as an element in JSX is a lowercase tag.** `<mesh>`, `<group>`,
 `<instancedMesh>` and wrappers such as `<animated.mesh>` are tracked. A library component
 such as drei's `<Box>` renders its own elements inside the library, so its objects
 resolve to the nearest element of yours, or to "no source found".
 
 **Editable means a literal.** A value computed at runtime, a prop passed in from a
 parent, or a constant imported from another file is shown but can't be edited. A constant
-in the same file is followed only when nothing else in the file has the same name.
+in the same file is followed only when nothing else in the file has the same name. A call's
+argument is the exception: it can be edited wherever the call is, in any file.
 
 **An instance's placement is read-only.** It comes from whatever wrote its matrix, usually
 a loop, so there's no single number in your source to change.
@@ -480,6 +606,9 @@ uses the same value. A constant used by other objects, or inside an expression s
 object can show the change, so a custom geometry, or an element's own `args`, has just the
 text field.
 
+**Values are found by name.** `mesh.position.set(1, 2, 3)` counts if `mesh` is the variable the object
+was first put in. Passed to a helper and changed there, it isn't connected to the object.
+
 **Costs are worked out, not measured.** The Performance section adds up what the object asks
 of the GPU if all of it is on screen, before shadow passes. Texture memory is an estimate.
 
@@ -493,9 +622,11 @@ long enough in the background, and tools that ask the page then report a timeout
 
 ## How it works
 
-- **While Vite serves your code,** the plugin gives every three.js element in your JSX a small
-  record of where it is: file, component, line and column, and the exact position of each
-  value. Your source files aren't changed, only the code Vite serves in development.
+- **While Vite serves your code,** the plugin reads it, following imports across your project, to
+  work out which functions end up making three.js objects. It adds a record of where each object comes
+  from: file, function, line and column, and the exact position of each value. In JSX that's on the
+  element. In plain code it's kept to one side, in a table the object isn't in. Your source files aren't
+  changed, only the code Vite serves in development.
 - **In the page,** the plugin adds the inspector before your app loads. It finds your renderers
   through three.js's own devtools hook, draws its outlines after your frame rather than taking
   over the render loop, so post-processing keeps working, and lives in a shadow root your CSS
@@ -528,12 +659,7 @@ You only install one: the plugin, which `init` does for you.
 | 7 | Ship | done — first release `0.1.0` |
 | 8 | One command, no wiring, for R3F | done — `0.1.5` |
 | 8.5 | Point an assistant at meshes, the Agent tab, live previews | done — `0.1.6` |
-| 9 | Plain three.js, nothing tagged | next — `0.2.0` |
-
-**Stage 9** brings the inspector to plain three.js. Click a mesh and see the line that created
-it, the chain of calls that led there with the values they were called with, and the helpers
-they used, such as a noise function. `0.2.0` will be the first version to support both three.js
-and React Three Fiber.
+| 9 | Plain three.js, nothing tagged, and no setup at all | done — `0.2.0` |
 
 The full plan is in
 [`docs/roadmap/`](docs/roadmap/Click-to-Source_Implementation_Plan_0.1.5-0.2.0.pdf), and what
@@ -550,8 +676,9 @@ click-to-source/
 │   ├── core/          # resolution, picking, highlight (bundled into the plugin)
 │   ├── shared/        # types shared by both halves
 │   ├── overlay/       # legacy React components
-│   └── examples/      # a plain R3F scene with only the plugin added
-├── e2e/               # browser tests against the example
+│   ├── examples/      # an R3F scene with only the plugin added
+│   └── examples-three/ # a plain three.js scene with only the plugin added
+├── e2e/               # browser tests against the examples
 └── docs/              # architecture notes, research, roadmap
 ```
 

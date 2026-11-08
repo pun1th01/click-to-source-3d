@@ -18,13 +18,17 @@ npm test
 `npm run build --workspaces`, which builds alphabetically and fails on a
 clean clone because the example imports the Vite plugin from its `dist`.
 
-To try a change in the browser, run the example and press Alt+Shift+C:
+To try a change in the browser, run an example and press Alt+Shift+C:
+
+```bash
+npm run dev -w @click-to-source-3d/examples-three
+```
 
 ```bash
 npm run dev -w @click-to-source-3d/examples
 ```
 
-The end-to-end tests drive the example in a real browser. Locally, use an
+The end-to-end tests drive the examples in a real browser. Locally, use an
 installed one rather than downloading Chromium:
 
 ```bash
@@ -41,8 +45,9 @@ CTS_E2E_CHANNEL=msedge npm run test:e2e
 | `packages/core` | Resolution, picking, the highlight, the bridge's browser half |
 | `packages/shared` | Types and protocol constants shared by both halves |
 | `packages/overlay` | Legacy React components |
-| `packages/examples` | A plain R3F scene with only the plugin added |
-| `e2e` | Playwright tests against the example, with a real MCP server in `agent.spec.ts` |
+| `packages/examples` | An R3F scene with only the plugin added |
+| `packages/examples-three` | A plain three.js scene with only the plugin added, and a page of awkward cases in `edge-cases.html` |
+| `e2e` | Playwright tests against the examples, with a real MCP server in `agent.spec.ts` and `three.spec.ts` |
 
 Design notes for earlier stages are in `docs/architecture/`.
 
@@ -52,7 +57,10 @@ Inside this repository the plugin is a workspace symlink, which Vite treats
 as source code. In a real project it sits in `node_modules`, and two bugs in
 0.1.5 appeared only there. Before a release that touches the plugin or the
 inspector, pack the packages, install them into a fresh `create-vite` app
-under npm and pnpm, run `init`, and check the console.
+under npm and pnpm, run `init`, and check the console. `init` takes
+`--plugin-spec=` and `--mcp-spec=` for this. Try the vanilla template, which has
+no Vite config, and React Three Fiber, and the oldest Vite and three.js the plugin says it
+supports.
 
 ## Pull requests
 
