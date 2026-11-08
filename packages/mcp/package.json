@@ -1,7 +1,7 @@
 {
   "name": "@click-to-source-3d/mcp",
   "version": "0.1.6",
-  "description": "MCP server that lets AI coding assistants like Claude Code see a running React Three Fiber (three.js) scene, read the meshes you point at, and edit their values in source.",
+  "description": "MCP server that lets AI coding assistants like Claude Code see a running three.js or React Three Fiber scene, read the meshes you point at, and edit their values in source.",
   "keywords": [
     "threejs",
     "three.js",

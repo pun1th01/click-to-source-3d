@@ -15,7 +15,7 @@ through it, to your app open in the browser.
 
 ## Scope
 
-**React Three Fiber, behind a Vite dev server** running
+**Plain three.js or React Three Fiber, behind a Vite dev server** running
 [`@click-to-source-3d/vite-plugin`](https://www.npmjs.com/package/@click-to-source-3d/vite-plugin)
 of the same version. The scene tools also need the app open in a browser tab.
 
@@ -24,8 +24,11 @@ of the same version. The scene tools also need the app open in a browser tab.
     npx click-to-source-3d init --mcp
 
 That installs this package and registers it in `.mcp.json` at the root of
-your repository. That file is Claude Code's, and Claude Code asks you to
-approve the server the first time it starts in the project.
+your repository, and in `.cursor/mcp.json` and `.vscode/mcp.json` where those
+folders exist. If the project already has signs of an assistant (`.claude`,
+`CLAUDE.md`, `.mcp.json`, `.cursor`, `.windsurf`), a plain
+`npx click-to-source-3d init` does this without being asked. Claude Code asks you
+to approve the server the first time it starts in the project.
 
 For another assistant, add the same entry to its own config file:
 

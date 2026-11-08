@@ -53,10 +53,11 @@ const INSTRUCTIONS =
   "Click-to-Source connects you to the developer's running 3D scene. When they " +
   'say "this", "these", "that mesh" or "the one I clicked", call get_selection ' +
   "first: it returns the objects they are pointing at in the browser, each with " +
-  "its source location and editable values. To change a value, pass its file, " +
-  "line, column and raw text to edit_parameter, which Vite then hot-reloads. To " +
-  "see the scene, call get_canvas_screenshot. To show them which object you mean, " +
-  "call highlight_object.";
+  "its source location, the calls that led to it, the helpers it uses and its " +
+  "editable values. It works for plain three.js and for React Three Fiber, with " +
+  "nothing tagged by hand. To change a value, pass its file, line, column and raw " +
+  "text to edit_parameter, which Vite then reloads. To see the scene, call " +
+  "get_canvas_screenshot. To show them which object you mean, call highlight_object.";
 
 const TOOLS = [
   {
@@ -67,12 +68,19 @@ const TOOLS = [
       'these so slow", "the one I clicked". `pointing` lists the objects they ' +
       "deliberately pointed you at, in order; act on these first. `selected` is " +
       "the object open in their inspector panel, and is what they mean if " +
-      "`pointing` is empty. Each object has its source file, component and line, " +
-      "its `props` with the exact line, column and raw text of every editable " +
-      "value, its transform and its rendering cost. A value with `via` is a " +
-      "constant, and its line and column are the constant's declaration, so " +
-      "changing it changes every use. Empty means they have not pointed at " +
-      "anything, so ask them to.",
+      "`pointing` is empty. Each object has its source file, function and line, " +
+      "its `props` with the file, exact line, column and raw text of every editable " +
+      "value, including its geometry's and material's, its transform and its rendering " +
+      "cost. A value with `via` is a constant, and its line and column are the " +
+      "constant's declaration, so changing it changes every use. In plain three.js, " +
+      "`trace` lists the calls that led to the object, outermost first, with the value " +
+      "of each argument, and where one was written as a literal, `literal` is what " +
+      "edit_parameter takes, in the file of that frame's `calledAt`. `generators` are " +
+      "the functions that made it, with their other `numbers` by line and the helpers " +
+      "they `uses`, such as a noise function, with those helpers' own numbers and " +
+      "files. `how` says if it was made by new, clone or load, and `modelPath` which " +
+      "part of something it is. Empty means they have not pointed at anything, so ask " +
+      "them to.",
     inputSchema: { type: "object", properties: {} },
   },
   {
@@ -232,8 +240,8 @@ const TOOLS = [
       "Resolve whatever is under a point in the RUNNING scene. Coordinates are " +
       "normalised device coordinates, -1 to 1. Needs the dev server running and " +
       "the app open in a browser tab; nothing else to set up. The answer " +
-      "includes the object's editable props, each with its exact line and " +
-      "column. Reports disconnected, no_scene, ambiguous or timeout rather than " +
+      "includes the object's editable props, each with its file and exact line " +
+      "and column, the calls that led to it and the functions behind it. Reports disconnected, no_scene, ambiguous or timeout rather than " +
       "failing silently — each has a different remedy.",
     inputSchema: {
       type: "object",
@@ -266,8 +274,9 @@ const TOOLS = [
       "InstancedMesh. Addresses come from list_scene_provenance and are " +
       "{file, function, line, ordinal} — derived from the source location " +
       "rather than from Object3D.uuid, which is regenerated on every remount. " +
-      "Read-only: an instance's transform comes from a seeded RNG, so no " +
-      "literal in source corresponds to it.",
+      "Includes the object's props, the calls that led to it and the functions " +
+      "behind it. An instance's own transform is read-only: it comes from whatever " +
+      "wrote its matrix, so no literal in source corresponds to it.",
     inputSchema: {
       type: "object",
       properties: {
