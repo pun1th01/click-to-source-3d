@@ -59,9 +59,9 @@ selects it.
 **4. `<GenerationTrace />`** — outside the `Canvas`. It renders DOM, not scene
 objects, and shows the file, function, line and editable arguments.
 
-**5. `<ClickToSourceBridge />`** — inside the `Canvas`, only if you want the
-agent tools in [`@click-to-source-3d/mcp`](https://www.npmjs.com/package/@click-to-source-3d/mcp)
-to query the live scene.
+Agent tools in [`@click-to-source-3d/mcp`](https://www.npmjs.com/package/@click-to-source-3d/mcp)
+talk to the page through the plugin, with nothing more to add.
+`<ClickToSourceBridge />` was removed in 0.2.0.
 
 ## Limits worth knowing before you adopt it
 
@@ -84,10 +84,6 @@ per-instance and correct; only the outline is coarse.
 compose with other post-processing that also claims a priority. Under
 `frameloop="demand"` it works — it requests a frame when the selection
 changes. Under `frameloop="never"` it cannot, and warns once in development.
-
-**`<ClickToSourceBridge />` answers only while the page renders.** R3F does not
-render `Canvas` children in a hidden or background tab, so a backgrounded page
-reports `disconnected`, indistinguishable from no page at all.
 
 ## License
 

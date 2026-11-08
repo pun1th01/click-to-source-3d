@@ -38,7 +38,7 @@ vi.mock("@react-three/fiber", () => ({
   },
 }));
 
-const { GenerationTrace, SelectionHighlight, ClickToSourceBridge, useOverlayStore } =
+const { GenerationTrace, SelectionHighlight, useOverlayStore } =
   await import("../src/index.js");
 
 afterAll(() => {
@@ -61,7 +61,6 @@ describe("the overlay in a production build", () => {
         <>
           <GenerationTrace />
           <SelectionHighlight />
-          <ClickToSourceBridge />
         </>
       );
     });
