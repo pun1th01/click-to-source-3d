@@ -1,7 +1,7 @@
 {
   "name": "click-to-source-3d",
   "version": "0.1.6",
-  "description": "One command to add Click-to-Source 3D to a Vite + React Three Fiber project: click any mesh to see the line of code that created it and edit its values live.",
+  "description": "One command, nothing else, to add Click-to-Source 3D to a three.js or React Three Fiber project: click any mesh to see the line of code that made it and edit its values live.",
   "keywords": [
     "threejs",
     "three.js",
@@ -54,6 +54,7 @@
   },
   "dependencies": {
     "@babel/parser": "^7.29.9",
+    "@click-to-source-3d/shared": "0.1.6",
     "magic-string": "^0.30.21"
   }
 }

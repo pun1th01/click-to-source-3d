@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { patchViteConfig } from "../src/viteConfig.js";
 
 const IMPORT = 'import { clickToSource } from "@click-to-source-3d/vite-plugin";';
+const WRAP_IMPORT = 'import { withClickToSource } from "@click-to-source-3d/vite-plugin";';
 
 function patched(code: string): string {
   const result = patchViteConfig(code);
@@ -87,15 +88,85 @@ describe("patchViteConfig", () => {
     ).toEqual({ status: "already" });
   });
 
-  it("reports what it cannot edit instead of guessing", () => {
-    const cases = [
-      "module.exports = { plugins: [] }\n",
-      "export default { plugins: getPlugins() }\n",
-      "export default makeConfig()\n",
-      "export default {{{ not code\n",
-    ];
+  it("wraps plugins it can't see into, which Vite flattens", () => {
+    expect(patched("export default { plugins: getPlugins() }\n")).toContain(
+      "plugins: [clickToSource(), getPlugins()]"
+    );
+    expect(patched("const plugins = [];\nexport default { plugins };\n")).toContain(
+      "{ plugins: [clickToSource(), plugins] }"
+    );
+  });
 
-    for (const code of cases) {
+  describe("a config that isn't one object", () => {
+    const wrapped = (code: string) => {
+      const out = patched(code);
+      expect(out).toContain(WRAP_IMPORT);
+      return out;
+    };
+
+    it("wraps a function that can return different ones", () => {
+      const out = wrapped(
+        [
+          "import { defineConfig } from 'vite'",
+          "export default defineConfig(({ mode }) => {",
+          "  if (mode === 'test') return { base: '/a/' }",
+          "  return { plugins: [] }",
+          "})",
+          "",
+        ].join("\n")
+      );
+      expect(out).toContain("export default withClickToSource(defineConfig(({ mode }) => {");
+      expect(out).toContain("}))");
+    });
+
+    it("isn't misled by a return inside a helper function", () => {
+      const out = patched(
+        "import { defineConfig } from 'vite'\nexport default defineConfig(() => {\n  const f = () => { return 1 }\n  return { plugins: [] }\n})\n"
+      );
+      expect(out).toContain("plugins: [clickToSource()]");
+    });
+
+    it("wraps a call to anything else", () => {
+      expect(wrapped("export default makeConfig()\n")).toContain("export default withClickToSource(makeConfig())");
+      expect(wrapped("import { mergeConfig } from 'vite'\nexport default mergeConfig(base, { plugins: [] })\n")).toContain(
+        "withClickToSource(mergeConfig(base, { plugins: [] }))"
+      );
+    });
+
+    // A spread can bring plugins of its own, which would replace these.
+    it("wraps an object with a spread in it", () => {
+      expect(wrapped("export default { ...base, server: {} }\n")).toContain(
+        "withClickToSource({ ...base, server: {} })"
+      );
+    });
+
+    it("wraps an imported config", () => {
+      expect(wrapped("import config from './base'\nexport default config\n")).toContain(
+        "export default withClickToSource(config)"
+      );
+    });
+
+    it("wraps a function declaration", () => {
+      expect(wrapped("export default async function config(env) { return { plugins: [] }; if (env) return {}; }\n")).toContain(
+        "withClickToSource(async function config(env)"
+      );
+    });
+
+    it("produces something that parses, and that it recognises afterwards", () => {
+      const out = wrapped("export default makeConfig() as UserConfig\n");
+      expect(patchViteConfig(out)).toEqual({ status: "already" });
+    });
+  });
+
+  it("handles a CommonJS config", () => {
+    const out = patched("const { defineConfig } = require('vite')\nmodule.exports = defineConfig({ plugins: [] })\n");
+
+    expect(out.startsWith('const { withClickToSource } = require("@click-to-source-3d/vite-plugin");')).toBe(true);
+    expect(out).toContain("module.exports = withClickToSource(defineConfig({ plugins: [] }))");
+  });
+
+  it("only gives up on a file that exports nothing, or can't be read", () => {
+    for (const code of ["console.log(1)\n", "export const a = 1\n", "export default {{{ not code\n"]) {
       expect(patchViteConfig(code).status, code).toBe("unsupported");
     }
   });
